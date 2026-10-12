@@ -24,7 +24,10 @@ const TONES = {
   none: { fill: MUTED, text: MUTED },
 } as const
 const FONT = "'Segoe UI', 'Yu Gothic UI', 'Hiragino Sans', system-ui, sans-serif"
-const HEIGHT = 26
+// 帯の上下の余白（約 21px）は Desktop が持っていて変えられないので、縦幅はバーで詰める
+const HEIGHT = 20
+const FONT_SIZE = 11
+const BASELINE = 14
 
 type Meter = {
   label: string
@@ -135,13 +138,13 @@ type TextColors = { label: string; detail: string; percent: string }
 
 function textLayer(meter: Meter, colors: TextColors, attributes = ''): string {
   const detail = meter.detail
-    ? `<text x="100%" dx="-48" y="17" font-size="11" fill="${colors.detail}" text-anchor="end">${escapeXml(meter.detail)}</text>`
+    ? `<text x="100%" dx="-44" y="${BASELINE}" fill="${colors.detail}" text-anchor="end">${escapeXml(meter.detail)}</text>`
     : ''
   return [
-    `<g font-family="${FONT}" font-size="12"${attributes}>`,
-    `<text x="10" y="17" fill="${colors.label}">${escapeXml(meter.label)}</text>`,
+    `<g font-family="${FONT}" font-size="${FONT_SIZE}"${attributes}>`,
+    `<text x="10" y="${BASELINE}" fill="${colors.label}">${escapeXml(meter.label)}</text>`,
     detail,
-    `<text x="100%" dx="-10" y="17" font-weight="600" fill="${colors.percent}" text-anchor="end">${percentText(meter.percent)}</text>`,
+    `<text x="100%" dx="-10" y="${BASELINE}" font-weight="600" fill="${colors.percent}" text-anchor="end">${percentText(meter.percent)}</text>`,
     `</g>`,
   ].join('')
 }
