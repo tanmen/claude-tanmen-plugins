@@ -25,11 +25,14 @@ const TONES = {
 } as const
 const FONT = "'Segoe UI', 'Yu Gothic UI', 'Hiragino Sans', system-ui, sans-serif"
 // 帯の上下の余白（11px / 10px）は Desktop の枠のもので、mod からは変えられない（負の margin は
-// 検査を通るが Desktop では無視された）。縦幅はバーで詰める。19px で帯が 40px になり、
-// Desktop 自身の「週間使用量の上限」の枠と同じ高さになる
-const HEIGHT = 19
-const FONT_SIZE = 11
-const BASELINE = 13
+// 検査を通るが Desktop では無視された）。縦幅はバーの高さで決まる。
+// compact（既定）はバー 19px で帯が 40px になり、Desktop 自身の「週間使用量の上限」の枠と同じ高さになる
+type Size = { height: number; fontSize: number; detailFontSize: number; baseline: number; detailDx: number }
+
+const SIZES: Record<'compact' | 'regular', Size> = {
+  compact: { height: 19, fontSize: 11, detailFontSize: 11, baseline: 13, detailDx: 44 },
+  regular: { height: 26, fontSize: 12, detailFontSize: 11, baseline: 17, detailDx: 48 },
+}
 
 type Meter = {
   label: string
@@ -138,47 +141,51 @@ function escapeXml(text: string): string {
 
 type TextColors = { label: string; detail: string; percent: string }
 
-function textLayer(meter: Meter, colors: TextColors, attributes = ''): string {
+function textLayer(meter: Meter, size: Size, colors: TextColors, attributes = ''): string {
   const detail = meter.detail
-    ? `<text x="100%" dx="-44" y="${BASELINE}" fill="${colors.detail}" text-anchor="end">${escapeXml(meter.detail)}</text>`
+    ? `<text x="100%" dx="-${size.detailDx}" y="${size.baseline}" font-size="${size.detailFontSize}" fill="${colors.detail}" text-anchor="end">${escapeXml(meter.detail)}</text>`
     : ''
   return [
-    `<g font-family="${FONT}" font-size="${FONT_SIZE}"${attributes}>`,
-    `<text x="10" y="${BASELINE}" fill="${colors.label}">${escapeXml(meter.label)}</text>`,
+    `<g font-family="${FONT}" font-size="${size.fontSize}"${attributes}>`,
+    `<text x="10" y="${size.baseline}" fill="${colors.label}">${escapeXml(meter.label)}</text>`,
     detail,
-    `<text x="100%" dx="-10" y="${BASELINE}" font-weight="600" fill="${colors.percent}" text-anchor="end">${percentText(meter.percent)}</text>`,
+    `<text x="100%" dx="-10" y="${size.baseline}" font-weight="600" fill="${colors.percent}" text-anchor="end">${percentText(meter.percent)}</text>`,
     `</g>`,
   ].join('')
 }
 
 // 薄い色の塗り＋到達点に 2px の縦線。幅はすべて % で書き、枠の幅に合わせて伸び縮みさせる
-function meterSvg(meter: Meter): string {
+function meterSvg(meter: Meter, size: Size): string {
   const tone = toneOf(meter)
   const width = meter.percent === null ? 0 : Math.min(100, Math.max(0, Math.round(meter.percent)))
+  const h = size.height
   // 縦線が文字を横切らないよう、文字の形（太らせたもの）だけ線をくり抜く
   const knockout = textLayer(
     meter,
+    size,
     { label: 'black', detail: 'black', percent: 'black' },
     ' stroke="black" stroke-width="5" stroke-linejoin="round"',
   )
   const edge =
     width > 0
-      ? `<g mask="url(#k)"><rect x="${width}%" width="2" height="${HEIGHT}" transform="translate(-2 0)" fill="${tone.text}"/></g>`
+      ? `<g mask="url(#k)"><rect x="${width}%" width="2" height="${h}" transform="translate(-2 0)" fill="${tone.text}"/></g>`
       : ''
 
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${HEIGHT}">`,
-    `<defs><clipPath id="r"><rect width="100%" height="${HEIGHT}" rx="6"/></clipPath>`,
-    `<mask id="k" maskUnits="userSpaceOnUse" x="0" y="0" width="100%" height="${HEIGHT}">`,
-    `<rect width="100%" height="${HEIGHT}" fill="white"/>${knockout}</mask></defs>`,
-    `<rect width="100%" height="${HEIGHT}" rx="6" fill="${TRACK}"/>`,
-    `<g clip-path="url(#r)"><rect width="${width}%" height="${HEIGHT}" fill="${tone.fill}" fill-opacity="0.25"/>${edge}</g>`,
-    textLayer(meter, { label: LABEL, detail: MUTED, percent: tone.text }),
+    `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${h}">`,
+    `<defs><clipPath id="r"><rect width="100%" height="${h}" rx="6"/></clipPath>`,
+    `<mask id="k" maskUnits="userSpaceOnUse" x="0" y="0" width="100%" height="${h}">`,
+    `<rect width="100%" height="${h}" fill="white"/>${knockout}</mask></defs>`,
+    `<rect width="100%" height="${h}" rx="6" fill="${TRACK}"/>`,
+    `<g clip-path="url(#r)"><rect width="${width}%" height="${h}" fill="${tone.fill}" fill-opacity="0.25"/>${edge}</g>`,
+    textLayer(meter, size, { label: LABEL, detail: MUTED, percent: tone.text }),
     `</svg>`,
   ].join('')
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const size = options.size === 'regular' ? SIZES.regular : SIZES.compact
+
   on('session.start', async ($, e, next) => {
     const usage = await $.session.usage()
     const now = await $.clock.now()
@@ -245,7 +252,7 @@ export const register: Register = on => {
       <Box flexDirection="row" gap={2}>
         {meters.map(meter => (
           <Box flexDirection="column" flexGrow={1} flexShrink={1} width="30%">
-            <Svg source={meterSvg(meter)} alt={meter.alt} />
+            <Svg source={meterSvg(meter, size)} alt={meter.alt} />
           </Box>
         ))}
       </Box>

@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 const BAND = {
   component: 'AbovePrompt',
@@ -158,4 +159,28 @@ test('応答が来ても 5h / 7d が空なら、持ち越した値を消す（AP
   expect(fiveHour).toContain('>--<')
   expect(fiveHour).not.toContain('>40%<')
   await ui.unmount()
+})
+
+async function barHeights($: Parameters<TestBody>[0], on: Parameters<TestBody>[1]) {
+  mock.clock(on)
+  mock.store(on)
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('ui.render', () => ({ type: 'Box' }))
+  await $.session.measure({ context: { tokens: 1_000, window: 200_000, percent: 1 }, rateLimits: [], changed: ['context'] })
+  const ui = await $.ui.mount({ plugin: 'usage-bars', surface: 'desktop', ...BAND })
+  const heights = (await ui.findAll({ type: 'Svg' })).map(bar => /<svg [^>]*height="(\d+)"/.exec(String(bar.props.source))?.[1])
+  await ui.unmount()
+  return heights
+}
+
+test('大きさの既定は compact（バー 19px）', async ($, on) => {
+  expect(await barHeights($, on)).toEqual(['19', '19', '19'])
+})
+
+test('size=regular ならバー 26px', { options: { size: 'regular' } }, async ($, on) => {
+  expect(await barHeights($, on)).toEqual(['26', '26', '26'])
+})
+
+test('選択肢に無い size は既定の compact に戻る', { options: { size: 'huge' } }, async ($, on) => {
+  expect(await barHeights($, on)).toEqual(['19', '19', '19'])
 })

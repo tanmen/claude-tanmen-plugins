@@ -1,11 +1,20 @@
 {
   "name": "usage-bars",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Claude Code Desktop の入力欄の上に context・5h・7d の使用率をバーで常時出す",
   "author": { "name": "tanmen", "url": "https://github.com/tanmen" },
   "homepage": "https://github.com/tanmen/claude-usage-bars",
   "repository": "https://github.com/tanmen/claude-usage-bars",
   "license": "MIT",
   "keywords": ["usage", "rate-limit", "context", "desktop"],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "size": {
+      "type": "string",
+      "title": "バーの大きさ",
+      "description": "compact はバー 19px（帯 40px）、regular はバー 26px（帯 47px）",
+      "options": ["compact", "regular"],
+      "default": "compact"
+    }
+  }
 }

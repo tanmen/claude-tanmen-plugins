@@ -51,6 +51,29 @@ user スコープで入れると、Desktop の Code タブで手元に作るセ�
 claude plugin uninstall usage-bars
 ```
 
+## 大きさ
+
+設定項目 `size` で 2 通りから選べる。
+
+| `size` | バー | 帯の高さ |
+| --- | --- | --- |
+| `compact`（既定） | 19px・文字 11px | 40px（Desktop 自身の使用量の通知と同じ高さ） |
+| `regular` | 26px・文字 12px | 47px |
+
+帯の上下の余白（約 21px）は Desktop の枠のもので、mod からは変えられない。大きさで変わるのはバーの高さと文字の大きさだけ。
+
+入れるときに選ぶ:
+
+```sh
+claude plugin install usage-bars --marketplace tanmen/claude-usage-bars --config size=regular
+```
+
+入れたあとに変える:
+
+```sh
+echo '{"size":"regular"}' | claude plugin configure usage-bars --values-stdin
+```
+
 ## 知っておくこと
 
 - **色はダークテーマ向け。** バーは SVG の画像として描かれ、アプリのテーマに追従しない。ライトテーマでは確かめていない
