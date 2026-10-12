@@ -1,6 +1,12 @@
 {
-  "name": "usage-bars",
-  "description": "Claude Code Desktop の入力欄の上に使用率のバーを出す mod",
-  "owner": { "name": "tanmen" },
-  "plugins": [{ "name": "usage-bars", "source": "./" }]
+  "name": "tanmen",
+  "description": "tanmen が作った Claude Code の mod（非公式）",
+  "owner": { "name": "tanmen", "url": "https://github.com/tanmen" },
+  "plugins": [
+    {
+      "name": "usage-bars",
+      "source": "./plugins/usage-bars",
+      "description": "Claude Code Desktop の入力欄の上に context・5h・7d の使用率をバーで常時出す"
+    }
+  ]
 }
