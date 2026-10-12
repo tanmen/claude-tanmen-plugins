@@ -24,8 +24,9 @@ const TONES = {
   none: { fill: MUTED, text: MUTED },
 } as const
 const FONT = "'Segoe UI', 'Yu Gothic UI', 'Hiragino Sans', system-ui, sans-serif"
-// 帯の上下の余白（約 21px）は Desktop が持っていて変えられないので、縦幅はバーで詰める。
-// 19px で帯が 40px になり、Desktop 自身の「週間使用量の上限」の枠と同じ高さになる
+// 帯の上下の余白（11px / 10px）は Desktop の枠のもので、mod からは変えられない（負の margin は
+// 検査を通るが Desktop では無視された）。縦幅はバーで詰める。19px で帯が 40px になり、
+// Desktop 自身の「週間使用量の上限」の枠と同じ高さになる
 const HEIGHT = 19
 const FONT_SIZE = 11
 const BASELINE = 13
