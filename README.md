@@ -48,7 +48,7 @@ user スコープで入れると、Desktop の Code タブで手元に作るセ�
 外すとき:
 
 ```sh
-claude plugin uninstall usage-bars
+claude plugin uninstall usage-bars@usage-bars
 ```
 
 ## 大きさ
@@ -68,10 +68,10 @@ claude plugin uninstall usage-bars
 claude plugin install usage-bars --marketplace tanmen/claude-usage-bars --config size=regular
 ```
 
-入れたあとに変える:
+入れたあとに変える（名前は `usage-bars@usage-bars` の形で渡す。変えたあとは Claude Code を起動し直すと効く）:
 
 ```sh
-echo '{"size":"regular"}' | claude plugin configure usage-bars --values-stdin
+echo '{"size":"regular"}' | claude plugin configure usage-bars@usage-bars --values-stdin
 ```
 
 ## 知っておくこと
