@@ -53,12 +53,14 @@ claude plugin uninstall usage-bars@usage-bars
 
 ## 大きさ
 
-設定項目 `size` で 2 通りから選べる。
+設定項目 `size` で 2 通りから選べる。上のスクリーンショットが既定の `compact`、下が `regular`。
 
 | `size` | バー | 帯の高さ |
 | --- | --- | --- |
 | `compact`（既定） | 19px・文字 11px | 40px（Desktop 自身の使用量の通知と同じ高さ） |
 | `regular` | 26px・文字 12px | 47px |
+
+![regular の見た目](docs/screenshot-regular.png)
 
 帯の上下の余白（約 21px）は Desktop の枠のもので、mod からは変えられない。大きさで変わるのはバーの高さと文字の大きさだけ。
 
