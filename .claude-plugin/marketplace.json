@@ -1,0 +1,6 @@
+{
+  "name": "usage-bars",
+  "description": "Claude Code Desktop の入力欄の上に使用率のバーを出す mod",
+  "owner": { "name": "tanmen" },
+  "plugins": [{ "name": "usage-bars", "source": "./" }]
+}

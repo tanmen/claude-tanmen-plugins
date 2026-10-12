@@ -1,0 +1,2 @@
+# Claude Code が mod を読み込むたびに書き直す型定義（版ごとに中身が変わる）
+.claude-plugin/types/
