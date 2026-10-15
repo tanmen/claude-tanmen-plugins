@@ -469,8 +469,10 @@ export const register: Register = (on, options) => {
     // ターミナルには statusLine があるので、帯は Desktop だけに出す
     if (e.surface !== 'desktop' || e.props.hasSurvey) return next(e)
 
+    // 下に別の mod（archive-check など）の木があれば、バーの左に並べる
+    const below = await next(e)
     const snap = await read($, snapshot)
-    if (snap === null) return next(e)
+    if (snap === null) return below
 
     const open = await read($, detail)
     const now = await $.clock.now()
@@ -481,10 +483,11 @@ export const register: Register = (on, options) => {
       ...WINDOWS.map(w => windowMeter(snap, w.kind, w.label, now)),
     ]
 
-    const bars = (
+    const meterRow = (
       <Box flexDirection="row" gap={2}>
         {meters.map(meter => (
-          <Box flexDirection="column" flexGrow={1} flexShrink={1} width="30%">
+          // 押せる面（absolute）の基準。無いと、ほかの木と並べたときに面が帯全体に広がる
+          <Box position="relative" flexDirection="column" flexGrow={1} flexShrink={1} width="30%">
             <Svg source={meterSvg(meter, size, open?.kind === meter.kind)} alt={meter.alt} />
             <Box position="absolute" top={0} left={0} right={0} bottom={0}>
               <Client key={`hit-${meter.kind}`} module="./hit.ts" props={{ kind: meter.kind }} width="100%" height="100%" />
@@ -492,6 +495,19 @@ export const register: Register = (on, options) => {
           </Box>
         ))}
       </Box>
+    )
+    const hasBelow = (below as { type?: unknown }).type !== 'engine'
+    const bars = hasBelow ? (
+      <Box flexDirection="row" gap={1}>
+        <Box flexDirection="column" flexShrink={0}>
+          {below}
+        </Box>
+        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+          {meterRow}
+        </Box>
+      </Box>
+    ) : (
+      meterRow
     )
     if (open === null) return bars
 

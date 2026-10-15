@@ -1,6 +1,6 @@
 {
   "name": "usage-bars",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Claude Code Desktop の入力欄の上に context・5h・7d の使用率をバーで常時出す",
   "author": { "name": "tanmen", "url": "https://github.com/tanmen" },
   "homepage": "https://github.com/tanmen/claude-tanmen-plugins/tree/main/plugins/usage-bars",

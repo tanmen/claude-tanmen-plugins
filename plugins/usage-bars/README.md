@@ -102,6 +102,7 @@ echo '{"size":"regular"}' | claude plugin configure usage-bars@tanmen --values-s
 - **送信前の「新しいセッション」画面には出ない。** Desktop は最初のメッセージを送ってから Claude Code を起動するので、その前は mod が動いていない
 - API キーや 3P プロバイダ・ゲートウェイで使っているときは 5h / 7d を出さず、記録した値も API も使わない。最初の応答が来ても 5h / 7d が空なら、灰色の値を消して `--` にする
 - 残り時間の表示は 1 分ごとに描き直す
+- 同じ帯にほかの mod（[archive-check](../archive-check) など）が描くときは、その分をバーの左に並べる
 - ターミナルには出さない（ターミナルには `statusLine` がある）。アンケートが出ている間は、帯をアンケートに譲る
 
 ## 開発

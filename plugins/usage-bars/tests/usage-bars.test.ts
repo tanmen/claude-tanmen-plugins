@@ -81,6 +81,35 @@ test('ターミナルとアンケート中は帯を描かない', async ($, on) 
   await survey.unmount()
 })
 
+test('下に別の mod の木があればバーの左に並べ、無ければバーだけを出す', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  let beneath: unknown = { type: 'Text', props: {}, children: ['下の mod'] }
+  on('ui.render', () => beneath as never)
+  await $.session.measure({
+    context: { tokens: 1_000, window: 200_000, percent: 1 },
+    rateLimits: [],
+    changed: ['context'],
+  })
+
+  const withBelow = await $.ui.mount({ plugin: 'usage-bars', surface: 'desktop', ...BAND })
+  const drawn = (await withBelow.drawn()) as { props?: { flexDirection?: string }; children?: unknown[] }
+  expect(drawn.props?.flexDirection).toBe('row')
+  expect(drawn.children).toHaveLength(2)
+  expect(await withBelow.find({ type: 'Text', text: '下の mod' })).toBeDefined()
+  expect(await withBelow.findAll({ type: 'Svg' })).toHaveLength(3)
+  await withBelow.unmount()
+
+  // エンジン自身の帯（下に何も無い）は出さず、バーだけ
+  beneath = { type: 'engine', ref: 0 }
+  const alone = await $.ui.mount({ plugin: 'usage-bars', surface: 'desktop', ...BAND })
+  expect(await alone.find({ type: 'Text', text: '下の mod' })).toBeUndefined()
+  const bars = (await alone.drawn()) as { children?: unknown[] }
+  expect(bars.children).toHaveLength(3)
+  await alone.unmount()
+})
+
 test('5h / 7d が無い間は前回の値を色を落として出す', async ($, on) => {
   const clock = mock.clock(on)
   const now = clock.now()
