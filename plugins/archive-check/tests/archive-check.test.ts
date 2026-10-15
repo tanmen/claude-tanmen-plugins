@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 
-import { endedTaskIds, parsePrStatus, pendingAsks, replayPlan } from '../hooks/logic'
+import { endedTaskIds, parsePrStatus, pendingAsks, publishedArtifacts, replayPlan } from '../hooks/logic'
 import type { MessageLite } from '../hooks/logic'
 import { MESSAGES } from '../hooks/messages'
 
@@ -346,6 +346,88 @@ test('枠にはこのセッションの後続だけを出し、他のセッシ�
   await pane.unmount()
 })
 
+// Artifact ツールの公開の記録（result は transcript の toolUseResult と同じ形）
+const publish = (id: string, title: string) => ({
+  tool: 'Artifact',
+  input: { file_path: `C:\\scratch\\${id}.html`, icon: 'compare' },
+  result: { url: `https://claude.ai/artifact/${id}`, title, updated: false, seq: 1 },
+  text: `Published C:\\scratch\\${id}.html at https://claude.ai/artifact/${id} (Version 1, version id 1-a)`,
+})
+
+test('作った Artifact があれば「注」にし、片付けを頼むと Claude に URL ごと頼んで枠から外す', JA, async ($, on) => {
+  const submitted: string[] = []
+  const clock = world(on, {
+    isRepo: false,
+    submitted,
+    messages: [{ role: 'assistant', text: '', toolUses: [publish('AAA111', '前後の絵'), publish('BBB222', '比べたページ')] }],
+  })
+  on('ui.render', () => ({ type: 'engine', ref: 0 }))
+  await start($, clock)
+
+  const ui = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...BAND })
+  expect((await badge(ui)).source).toContain('>注<')
+
+  const pane = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...PANE })
+  expect(await pane.find({ type: 'Text', text: 'アーカイブする前に確かめること' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '作った Artifact 2 件' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '「前後の絵」「比べたページ」' })).toBeDefined()
+  const buttons = await pane.findAll({ type: 'Button' })
+  expect(buttons.map(b => String(b.props.label))).toEqual(['片付けを頼む', '残す'])
+
+  await pane.press({ key: String(buttons[0]?.props.key) })
+  await clock.settle()
+  expect(submitted).toHaveLength(1)
+  expect(submitted[0]).toContain('このセッションで作った Artifact 2 件を artifact-sweep で調べて、要らないものを消して')
+  expect(submitted[0]).toContain('- 「前後の絵」 https://claude.ai/artifact/AAA111')
+  expect(submitted[0]).toContain('https://claude.ai/artifact/BBB222')
+  // 頼んだ分は枠から外れ、ほかに何も無いので「済」に戻る
+  expect((await badge(ui)).source).toContain('>済<')
+  await pane.unmount()
+  await ui.unmount()
+})
+
+test('作った Artifact は「残す」で枠から外れ、Claude には何も送らない', JA, async ($, on) => {
+  const submitted: string[] = []
+  const clock = world(on, {
+    isRepo: false,
+    submitted,
+    messages: [{ role: 'assistant', text: '', toolUses: [publish('AAA111', '計画')] }],
+  })
+  on('ui.render', () => ({ type: 'engine', ref: 0 }))
+  await start($, clock)
+
+  const pane = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...PANE })
+  // 1 件ならその Artifact を開くリンクが付く
+  expect((await pane.findAll({ type: 'Link' })).map(l => String(l.props.href))).toEqual(['https://claude.ai/artifact/AAA111'])
+  const keep = (await pane.findAll({ type: 'Button' })).find(b => String(b.props.label) === '残す')
+  await pane.press({ key: String(keep?.props.key) })
+  await clock.settle()
+  expect(submitted).toEqual([])
+  expect(await pane.find({ type: 'Text', text: /作った Artifact/ })).toBeUndefined()
+
+  const ui = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...BAND })
+  expect((await badge(ui)).source).toContain('>済<')
+  await ui.unmount()
+  await pane.unmount()
+})
+
+test('作った Artifact の行は英語の既定でも出る（Ask to tidy up / Keep）', async ($, on) => {
+  const submitted: string[] = []
+  const clock = world(on, { isRepo: false, submitted, messages: [{ role: 'assistant', text: '', toolUses: [publish('AAA111', 'Plan')] }] })
+  on('ui.render', () => ({ type: 'engine', ref: 0 }))
+  await start($, clock)
+
+  const pane = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...PANE })
+  expect(await pane.find({ type: 'Text', text: '1 artifact created' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '“Plan”' })).toBeDefined()
+  const buttons = await pane.findAll({ type: 'Button' })
+  expect(buttons.map(b => String(b.props.label))).toEqual(['Ask to tidy up', 'Keep'])
+  await pane.press({ key: String(buttons[0]?.props.key) })
+  expect(submitted[0]).toContain('Check the 1 artifact created in this session with artifact-sweep')
+  expect(submitted[0]).toContain('- “Plan” https://claude.ai/artifact/AAA111')
+  await pane.unmount()
+})
+
 test('ターミナルとアンケート中は帯に描かない', JA, async ($, on) => {
   const clock = world(on, { dirty: ' M a.ts\n' })
   on('ui.render', () => ({ type: 'engine', ref: 0 }))
@@ -476,6 +558,45 @@ test('最後の wrap_up の ask は、そのあとに何も無いときだけ承
     { text: '新しいセッションか、ここでやるか「別件」', actions: [] },
   ])
   expect(pendingAsks([assistant(use('AskUserQuestion', {}))], JA_M)).toEqual([{ text: '質問への回答', actions: [] }])
+})
+
+test('作った Artifact を公開の記録から拾い、消したもの・資産・前の会話の更新は数えない', () => {
+  const art = (input: Record<string, unknown>, result?: unknown, text?: string, isError?: true) => ({
+    tool: 'Artifact',
+    input,
+    ...(result === undefined ? {} : { result }),
+    ...(text === undefined ? {} : { text }),
+    ...(isError ? { isError } : {}),
+  })
+  const messages: MessageLite[] = [
+    assistant(
+      // 記録の url と title から
+      art({ file_path: 'a.html' }, { url: 'https://claude.ai/artifact/AAA', title: 'A' }, 'Published a.html at https://claude.ai/artifact/AAA'),
+      // 同じ file_path の再公開は 1 件のまま（題は新しいほう）
+      art({ file_path: 'a.html' }, { url: 'https://claude.ai/artifact/AAA', title: 'A2' }, 'Published a.html at https://claude.ai/artifact/AAA'),
+      // 記録が無ければ本文の URL から（action: publish を明示した形）
+      art({ action: 'publish', file_path: 'b.html' }, undefined, 'Published b.html at https://claude.ai/artifact/BBB (Version 1)'),
+      // 型から作った Artifact も数える
+      art({ type_url: 'https://claude.ai/artifact/TYPE', title: 'From type' }, { url: 'https://claude.ai/artifact/CCC' }, 'Created'),
+      // 前の会話の Artifact の更新・資産の上げ下ろし・読む・一覧・失敗した公開は数えない
+      art({ url: 'https://claude.ai/artifact/OLD', file_path: 'o.html' }, { url: 'https://claude.ai/artifact/OLD', title: 'old' }, 'Published'),
+      art({ url: 'https://claude.ai/artifact/AAA', asset: true, file_path: 'x.png' }, { url: 'https://claude.ai/artifact/AAA/assets/x' }, 'Uploaded'),
+      art({ action: 'read', url: 'https://claude.ai/artifact/RRR' }, undefined, 'https://claude.ai/artifact/RRR'),
+      art({ action: 'list' }, undefined, '- x — https://claude.ai/artifact/LLL'),
+      art({ file_path: 'e.html' }, undefined, 'Error: https://claude.ai/artifact/EEE', true),
+      // BBB は消した。AAA の資産だけを消した呼び出しでは AAA は残る
+      art({ action: 'delete', url: 'https://claude.ai/artifact/BBB' }, undefined, 'Deleted'),
+      art({ action: 'delete', url: 'https://claude.ai/artifact/AAA', path: '0123456789abcdef0123456789abcdef' }, undefined, 'Deleted asset'),
+    ),
+  ]
+  expect(publishedArtifacts(messages)).toEqual([
+    { id: 'AAA', url: 'https://claude.ai/artifact/AAA', title: 'A2' },
+    { id: 'CCC', url: 'https://claude.ai/artifact/CCC', title: 'From type' },
+  ])
+  // 確認待ち（結果がまだ無い）の削除と、本人が断った削除（isError）では消えない
+  const made = art({ file_path: 'b.html' }, { url: 'https://claude.ai/artifact/BBB' }, 'Published')
+  expect(publishedArtifacts([assistant(made, art({ action: 'delete', url: 'https://claude.ai/artifact/BBB' }))])).toHaveLength(1)
+  expect(publishedArtifacts([assistant(made, art({ action: 'delete', url: 'https://claude.ai/artifact/BBB' }, undefined, 'denied', true))])).toHaveLength(1)
 })
 
 test('背景タスクの終わりを知らせと TaskStop から引く', () => {

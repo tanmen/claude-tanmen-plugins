@@ -2,7 +2,7 @@
 import type { FollowUp, Reason, ReasonAction, Verdict } from '../types'
 import type { Messages } from './messages'
 
-export type ToolUseLite = { tool: string; input: Record<string, unknown>; text?: string; result?: unknown }
+export type ToolUseLite = { tool: string; input: Record<string, unknown>; text?: string; result?: unknown; isError?: true }
 export type MessageLite = { role: 'user' | 'assistant'; text: string; toolUses: readonly ToolUseLite[] }
 
 export const FOLLOWUP_TOOL = 'mcp__archive-check__followup'
@@ -202,6 +202,58 @@ export function followupReasons(followups: readonly FollowUp[], m: Messages): Re
   }))
 }
 
+// このセッションで公開した Artifact。Artifact ツールの公開（action 無し / publish）の結果から拾う
+export type PublishedArtifact = { id: string; url: string; title: string }
+
+const ARTIFACT_URL = /https:\/\/claude\.ai\/(?:code\/)?artifact\/([A-Za-z0-9-]+)/
+
+function artifactIdOf(url: string): string | null {
+  return ARTIFACT_URL.exec(url)?.[1] ?? null
+}
+
+export function publishedArtifacts(messages: readonly MessageLite[]): PublishedArtifact[] {
+  const found = new Map<string, PublishedArtifact>()
+  const deleted = new Set<string>()
+  for (const msg of messages) {
+    for (const u of msg.toolUses) {
+      if (u.tool !== 'Artifact' || u.isError === true) continue
+      const action = u.input.action ?? 'publish'
+      if (action === 'delete') {
+        // 資産（asset）だけを消した呼び出しは Artifact そのものを消さない
+        const id = typeof u.input.url === 'string' && u.input.path === undefined ? artifactIdOf(u.input.url) : null
+        if (id !== null && u.text !== undefined) deleted.add(id)
+        continue
+      }
+      // 資産の上げ下ろしと、前の会話の Artifact の更新（url を渡した公開）は、このセッションで作ったものではない
+      if (action !== 'publish' || u.input.asset === true || u.input.url !== undefined) continue
+      // 結果の記録（url・title）を先に見て、無ければ本文の「Published … at https://claude.ai/artifact/…」から拾う
+      const result = (typeof u.result === 'object' && u.result !== null ? u.result : {}) as { url?: unknown; title?: unknown }
+      const url = typeof result.url === 'string' && artifactIdOf(result.url) !== null ? result.url : ARTIFACT_URL.exec(u.text ?? '')?.[0]
+      const id = url === undefined ? null : artifactIdOf(url)
+      if (url === undefined || id === null) continue
+      const title = typeof result.title === 'string' ? result.title : typeof u.input.title === 'string' ? u.input.title : ''
+      found.set(id, { id, url, title: title || found.get(id)?.title || '' })
+    }
+  }
+  return [...found.values()].filter(a => !deleted.has(a.id))
+}
+
+export function artifactReasons(artifacts: readonly PublishedArtifact[], handled: readonly string[], m: Messages): Reason[] {
+  const left = artifacts.filter(a => !handled.includes(a.id))
+  if (left.length === 0) return []
+  return [
+    {
+      level: 'caution',
+      kind: 'artifact',
+      text: m.artifacts(left.length),
+      note: m.artifactTitles(left.map(a => a.title || a.id)),
+      ...(left.length === 1 ? { href: left[0]?.url } : {}),
+      artifactIds: left.map(a => a.id),
+      actions: [{ label: m.sweepLabel, prompt: m.sweepPrompt(left) }],
+    },
+  ]
+}
+
 export function isFollowUp(value: unknown): value is FollowUp {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Partial<FollowUp>
@@ -209,6 +261,7 @@ export function isFollowUp(value: unknown): value is FollowUp {
 }
 
 export const FOLLOWUP_PREFIX = 'followups:'
+export const ARTIFACT_PREFIX = 'artifacts:'
 
 // 設定のパスの頭の ~ をホームに置き換える
 export function expandHome(path: string, home: string): string {
@@ -229,11 +282,12 @@ const ORDER: Record<Reason['kind'], number> = {
   card: 2,
   task: 3,
   followup: 4,
-  ci: 5,
-  ask: 6,
-  plan: 7,
-  pr: 8,
-  unread: 9,
+  artifact: 5,
+  ci: 6,
+  ask: 7,
+  plan: 8,
+  pr: 9,
+  unread: 10,
 }
 
 export function sortReasons(reasons: readonly Reason[]): Reason[] {

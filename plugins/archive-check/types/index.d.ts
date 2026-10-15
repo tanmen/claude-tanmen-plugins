@@ -7,6 +7,7 @@ export type ReasonKind =
   | 'card'
   | 'task'
   | 'followup'
+  | 'artifact'
   | 'ci'
   | 'ask'
   | 'plan'
@@ -27,6 +28,8 @@ export type Reason = {
   note?: string
   // 後続なら、その id（枠の「済みにする」「予定に移す」が使う）
   followupId?: string
+  // このセッションで公開した Artifact の行なら、その id（枠の「残す」と、片付けを頼んだあとに行を外すのに使う）
+  artifactIds?: string[]
   // 枠のボタン（Claude に頼む）
   actions?: ReasonAction[]
   // 枠のリンク（PR など）

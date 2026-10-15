@@ -3,6 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BackgroundTask, FollowUp, Reason, ReasonAction, Report, Verdict } from '../types'
 import {
+  ARTIFACT_PREFIX,
+  artifactReasons,
   askReasons,
   cardReasons,
   endedTaskIds,
@@ -13,6 +15,7 @@ import {
   parsePrStatus,
   pendingAsks,
   prHref,
+  publishedArtifacts,
   recordPrs,
   replayPlan,
   sortReasons,
@@ -111,9 +114,20 @@ async function removeFollowupOf($: EngineInterface, cliId: string, id: string): 
   return found
 }
 
+// ---- このセッションで公開した Artifact のうち、もう枠に出さないもの（「残す」か「片付けを頼む」を押した）。id の並びを置く
+async function loadHandledArtifacts($: EngineInterface, cliId: string): Promise<string[]> {
+  const value = await $.store.get(`${ARTIFACT_PREFIX}${cliId}`)
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
+async function markArtifactsHandled($: EngineInterface, cliId: string, ids: readonly string[]): Promise<void> {
+  const prev = await loadHandledArtifacts($, cliId)
+  await $.store.set(`${ARTIFACT_PREFIX}${cliId}`, [...new Set([...prev, ...ids])])
+}
+
 // 枠のボタンから Claude に頼む。届いたかを $.store の lastSubmit:<CLI のセッション id> に残す（道具の list で読める）。
-// 依頼文の本文は残さない（store は全セッション共通）
-async function submitPrompt($: EngineInterface, action: ReasonAction): Promise<void> {
+// 依頼文の本文は残さない（store は全セッション共通）。onSubmitted は依頼が入ったときだけ呼ぶ（Claude が動いている間に押すと、あとで呼ばれる）
+async function submitPrompt($: EngineInterface, action: ReasonAction, onSubmitted?: () => Promise<void>): Promise<void> {
   const at = await $.clock.now()
   const key = `lastSubmit:${await $.session.id()}`
   const record = (result: string, detail: string) =>
@@ -121,7 +135,11 @@ async function submitPrompt($: EngineInterface, action: ReasonAction): Promise<v
   try {
     const submitting = $.prompt.submit({ text: action.prompt, asUser: true })
     void submitting.then(
-      done => (done.drop !== undefined ? record('dropped', String(done.drop)) : record('submitted', '')),
+      async done => {
+        if (done.drop !== undefined) return record('dropped', String(done.drop))
+        await record('submitted', '')
+        if (onSubmitted) await onSubmitted().catch(() => undefined)
+      },
       err => record('error', String(err)),
     )
     const settled = await Promise.race([
@@ -375,6 +393,7 @@ async function evaluate($: EngineInterface): Promise<Report> {
   }
 
   reasons.push(...followupReasons(await loadFollowupsOf($, cliId), m))
+  reasons.push(...artifactReasons(publishedArtifacts(messages), await loadHandledArtifacts($, cliId), m))
   reasons.push(...askReasons(pendingAsks(messages, m)))
   const plan = replayPlan(messages)
   if (plan.left > 0) reasons.push({ level: 'caution', kind: 'plan', text: m.planLeft(plan.left, plan.next) })
@@ -554,8 +573,25 @@ export const register: Register = (on, options) => {
             />
           ) : null}
           {(r.actions ?? []).map((a, j) => (
-            <Button key={`act:${i}:${j}`} label={a.label} onPress={() => submitPrompt($, a)} />
+            <Button
+              key={`act:${i}:${j}`}
+              label={a.label}
+              onPress={() =>
+                // Artifact の片付けを頼んだら、その分は枠から外す（消すかどうかは Claude と本人が決める）
+                submitPrompt($, a, r.artifactIds ? () => markArtifactsHandled($, cliId, r.artifactIds ?? []).then(() => runEvaluate($)) : undefined)
+              }
+            />
           ))}
+          {r.artifactIds ? (
+            <Button
+              key="keep:artifacts"
+              label={m.keepLabel}
+              onPress={async () => {
+                await markArtifactsHandled($, cliId, r.artifactIds ?? [])
+                await runEvaluate($)
+              }}
+            />
+          ) : null}
         </Box>
       </Box>
     )

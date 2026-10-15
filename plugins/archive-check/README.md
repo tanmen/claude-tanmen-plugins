@@ -2,7 +2,7 @@
 
 Claude Code Desktop（Code タブ）の入力欄の上に、そのセッションをアーカイブしてよいかを小さな札で出す mod（Claude Code のプラグイン）。札を押すと右側に枠が開き、理由と、その場でできる操作が並ぶ。
 
-An unofficial Claude Code mod that shows, above the prompt in Claude Code Desktop, whether the session is safe to archive: **Done**, **Check** or **Busy**. Press the badge to open a pane on the right with the reasons and an action for each (mark a follow-up done, ask Claude to commit, push, schedule or start a suggested task, answer a waiting wrap-up question). It also keeps "follow-ups" — checks that can only be done later — that Claude writes down, so you notice them before archiving.
+An unofficial Claude Code mod that shows, above the prompt in Claude Code Desktop, whether the session is safe to archive: **Done**, **Check** or **Busy**. Press the badge to open a pane on the right with the reasons and an action for each (mark a follow-up done, ask Claude to commit, push, schedule or start a suggested task, answer a waiting wrap-up question, ask Claude to tidy up the artifacts this session created). It also keeps "follow-ups" — checks that can only be done later — that Claude writes down, so you notice them before archiving.
 
 Anthropic の公式のものではありません。
 
@@ -11,7 +11,7 @@ Anthropic の公式のものではありません。
 | 札（en / ja） | 意味 | 何で決まるか |
 | --- | --- | --- |
 | `Busy` / `作` | アーカイブすると作業を失う | 未コミットの変更 / 今のブランチ（HEAD）の、remote に無いコミット（HEAD がマージ済みの PR の head と同じなら除く）/ 未起動の提案カード（期限切れは除く）/ 動いている背景タスク（`run_in_background` の Bash・PowerShell と Monitor）/ 動いているエージェント |
-| `Check` / `注` | アーカイブしてよいが、先に確かめること | 後続 / 開いた PR の CI が終わっていない / 返事待ち（最後の wrap_up の質問・AskUserQuestion・「新しいセッションか、ここでやるか」）/ タスク一覧の残り / 開いた PR / 材料が読めなかった |
+| `Check` / `注` | アーカイブしてよいが、先に確かめること | 後続 / このセッションで作った Artifact（片付けを頼むか残すまで）/ 開いた PR の CI が終わっていない / 返事待ち（最後の wrap_up の質問・AskUserQuestion・「新しいセッションか、ここでやるか」）/ タスク一覧の残り / 開いた PR / 材料が読めなかった |
 | `Done` / `済` | どれも無い | |
 
 - 材料（Desktop の記録・git・PR の状態・会話・設定 `guide` の Markdown）が読めなかったとき、判定が途中で失敗したときは `Done` にせず `Check` にして、枠に何が読めなかったかを出す。git の管理外のフォルダは「失うものが無い」として扱う
@@ -24,6 +24,7 @@ Anthropic の公式のものではありません。
 | 行 | 操作 |
 | --- | --- |
 | 後続 | `Mark done`（mod だけで消す）/ `Schedule`（予定タスクにするよう Claude に頼む） |
+| 作った Artifact | `Ask to tidy up`（要るかを調べて要らないものを消すよう Claude に頼む）/ `Keep`（mod だけで枠から外す）/ 1 件なら `Open` |
 | 返事待ちの wrap_up の質問 | 質問の選択肢と同じ返事を送る（`commit` などアプリの操作は、同じことを Claude に頼む） |
 | 未起動の提案カード | `Ask to start`（起動を Claude に頼む） |
 | 未コミットの変更 / remote に無いコミット | `Ask to commit` / `Ask to push` |
@@ -35,6 +36,17 @@ Anthropic の公式のものではありません。
 ## 後続
 
 「今やる作業は無いが、時間が経たないと結果が分からない確認」（3 日後に反応を見て値下げを決める / 数日使ってから効いたか確かめる など）。mod が登録するツール `mcp__archive-check__followup` で Claude が書き出し（`add` / `done` / `list`）、いつ書き出すかの指示を mod がシステムプロンプトに 1 節足す。後続はセッションごとに mod の store に置き、CLI が止まって開き直しても残る。
+
+## 作った Artifact
+
+使い終わった claude.ai の Artifact（前後の比較・確認用のページなど）が、要るのか要らないのか分からないまま残り続けるのを、畳む前に拾うための行。
+このセッションの Artifact ツールの公開（`type_url` から作ったものを含む）を会話の記録から拾う。前の会話の Artifact の更新（`url` を渡した公開）と
+資産の上げ下ろしは数えず、このセッションで消したものは外す。読むのはメインの会話の新しい 4096 件までで、エージェントが公開したものは数えない。
+
+- 要るかどうかの判断と削除は Claude と本人に任せ、mod は消さない（消すのは Claude の Artifact ツールの `delete`）。`Ask to tidy up` は、作った Artifact の
+  URL を並べて「artifact-sweep で調べて、要らないものを消して」と頼む。artifact-sweep は作者の手元の skill で、このリポジトリには入っていない。
+  無ければ、それぞれがどこから張られているかを調べ、消す前に聞くよう頼む文になっている
+- 頼んだ分（依頼が入った分）と `Keep` を押した分は、このセッションの枠に出さなくなる。あとで同じセッションで作った分は、また出る
 
 ## 設定
 
@@ -58,9 +70,9 @@ echo '{"language":"ja"}' | claude plugin configure archive-check@tanmen --values
 - 読むだけ:
   - Desktop のセッションの記録（Windows は `%APPDATA%\Claude\claude-code-sessions\…\<セッション>.json`、macOS は `~/Library/Application Support/Claude/claude-code-sessions/…`）。このセッションの分だけ。アプリの内部のファイルで、形が変わると読めなくなる
   - `~/.claude/sessions/` の各 json（使うのはこの CLI の起動時刻だけ）
-  - 作業フォルダの `git rev-parse` / `git status` / `git rev-list`、このセッションの会話とエージェントの一覧、設定 `guide` の Markdown
+  - 作業フォルダの `git rev-parse` / `git status` / `git rev-list`、このセッションの会話（ツールの呼び出しと結果を含む）とエージェントの一覧、設定 `guide` の Markdown
 - GitHub に問い合わせる: PR の状態を `gh pr view` で引く。このセッションの記録に載った開いている PR ごとに、同じ PR は 3 分に 1 回まで（判定は 1 分ごととツールの呼び出しのたび）。今のブランチに remote に無いコミットがあるときは、マージ済みの PR も引く。資格情報は gh が持ったままで、mod には渡らない
-- 書く: mod 自身の store（後続と、このセッションで最後に「頼む」ボタンを押した結果。依頼文の本文は残さない）だけ。アプリの記録やリポジトリには書かない
+- 書く: mod 自身の store（後続、枠に出さなくなった Artifact の id、このセッションで最後に「頼む」ボタンを押した結果。依頼文の本文は残さない）だけ。アプリの記録やリポジトリには書かない
 
 ## 必要なもの
 

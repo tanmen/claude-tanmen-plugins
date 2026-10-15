@@ -44,6 +44,8 @@ export type Messages = {
   askQuestion: string
   askOffer: (title: string) => string
   followup: (what: string, when: string) => string
+  artifacts: (n: number) => string
+  artifactTitles: (titles: string[]) => string
   // ボタンと、押すと Claude に送る依頼
   launchLabel: string
   launchPrompt: (title: string, id: string) => string
@@ -53,6 +55,9 @@ export type Messages = {
   pushPrompt: string
   scheduleLabel: string
   schedulePrompt: (f: { id: string; what: string; when: string; how: string; dueAt?: string }, tool: string) => string
+  sweepLabel: string
+  sweepPrompt: (artifacts: { url: string; title: string }[]) => string
+  keepLabel: string
   appActions: Record<string, { label: string; prompt: string }>
   // 知らせ
   asked: (label: string) => string
@@ -106,6 +111,8 @@ const en: Messages = {
   askQuestion: 'A question to answer',
   askOffer: title => `New session or here: “${title}”`,
   followup: (what, when) => (when ? `${what} (${when})` : what),
+  artifacts: n => `${n} ${n === 1 ? 'artifact' : 'artifacts'} created`,
+  artifactTitles: titles => titles.map(t => `“${t}”`).join(', '),
   launchLabel: 'Ask to start',
   launchPrompt: (title, id) => `Start the suggested task “${title}”${id ? ` (${id})` : ''} (from the archive-check pane).`,
   commitLabel: 'Ask to commit',
@@ -121,6 +128,14 @@ const en: Messages = {
       'The scheduled task runs in a new session, so write the context it needs into its prompt. If the time is unclear, ask before creating it.',
       `Once it exists, remove the follow-up with ${tool} (action: done, id: ${f.id}).`,
     ].join('\n'),
+  sweepLabel: 'Ask to tidy up',
+  sweepPrompt: artifacts =>
+    [
+      `Check the ${artifacts.length} ${artifacts.length === 1 ? 'artifact' : 'artifacts'} created in this session with artifact-sweep and delete the ones no longer needed (from the archive-check pane).`,
+      ...artifacts.map(a => `- ${a.title ? `“${a.title}” ` : ''}${a.url}`),
+      "If you don't have artifact-sweep, check where each one is linked from (docs, memory, PR descriptions) and ask me before deleting any.",
+    ].join('\n'),
+  keepLabel: 'Keep',
   appActions: {
     commit: { label: 'Commit', prompt: 'Commit' },
     create_pr: { label: 'Create PR', prompt: 'Create the PR' },
@@ -193,6 +208,8 @@ const ja: Messages = {
   askQuestion: '質問への回答',
   askOffer: title => `新しいセッションか、ここでやるか「${title}」`,
   followup: (what, when) => (when ? `${what}（${when}）` : what),
+  artifacts: n => `作った Artifact ${n} 件`,
+  artifactTitles: titles => titles.map(t => `「${t}」`).join(''),
   launchLabel: '起動を頼む',
   launchPrompt: (title, id) => `提案カード「${title}」${id ? `（${id}）` : ''}を起動して（archive-check の枠から）。`,
   commitLabel: 'コミットを頼む',
@@ -208,6 +225,14 @@ const ja: Messages = {
       '予定は新しいセッションで動くので、prompt にはこのセッションの前提を書き込む。日時がはっきりしなければ作る前に聞く。',
       `作れたら ${tool}（action: done, id: ${f.id}）で後続から消す。`,
     ].join('\n'),
+  sweepLabel: '片付けを頼む',
+  sweepPrompt: artifacts =>
+    [
+      `このセッションで作った Artifact ${artifacts.length} 件を artifact-sweep で調べて、要らないものを消して（archive-check の枠から）。`,
+      ...artifacts.map(a => `- ${a.title ? `「${a.title}」 ` : ''}${a.url}`),
+      'artifact-sweep が無ければ、それぞれがどこから張られているか（docs・memory・PR 本文）を調べ、消す前に聞いて。',
+    ].join('\n'),
+  keepLabel: '残す',
   appActions: {
     commit: { label: 'コミット', prompt: 'コミットして' },
     create_pr: { label: 'PR を作る', prompt: 'PR を作って' },
