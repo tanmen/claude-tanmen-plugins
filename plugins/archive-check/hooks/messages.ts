@@ -15,13 +15,10 @@ export type Messages = {
   nothingLeft: string
   sectionBlocked: string
   sectionCaution: string
-  sectionOthers: string
   tagFollowup: string
   tagAsk: string
-  archived: string
   open: string
   markDone: string
-  sessionFallback: (cliId: string) => string
   // 理由
   unread: (what: string) => string
   unreadWhat: {
@@ -81,13 +78,10 @@ const en: Messages = {
   nothingLeft: 'Nothing left',
   sectionBlocked: 'Lost if you archive',
   sectionCaution: 'Check before archiving',
-  sectionOthers: 'Follow-ups in other sessions',
   tagFollowup: 'Follow-up',
   tagAsk: 'Waiting on you',
-  archived: 'Archived',
   open: 'Open',
   markDone: 'Mark done',
-  sessionFallback: cliId => `Session ${cliId}`,
   unread: what => `Couldn't read: ${what}`,
   unreadWhat: {
     record: 'Desktop session record',
@@ -171,13 +165,10 @@ const ja: Messages = {
   nothingLeft: '残っているものはありません',
   sectionBlocked: 'アーカイブすると失うもの',
   sectionCaution: 'アーカイブする前に確かめること',
-  sectionOthers: '他のセッションの後続',
   tagFollowup: '後続',
   tagAsk: '承認待ち',
-  archived: 'アーカイブ済み',
   open: '開く',
   markDone: '済みにする',
-  sessionFallback: cliId => `セッション ${cliId}`,
   unread: what => `読めなかった: ${what}`,
   unreadWhat: {
     record: 'Desktop の記録',

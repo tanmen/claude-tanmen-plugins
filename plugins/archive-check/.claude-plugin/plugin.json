@@ -1,6 +1,6 @@
 {
   "name": "archive-check",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Claude Code Desktop の入力欄の上に、このセッションをアーカイブしてよいか（Done / Check / Busy）を札で出し、押すと右側の枠に理由と操作を並べる",
   "author": { "name": "tanmen", "url": "https://github.com/tanmen" },
   "homepage": "https://github.com/tanmen/claude-tanmen-plugins/tree/main/plugins/archive-check",

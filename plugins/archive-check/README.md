@@ -30,11 +30,11 @@ Anthropic の公式のものではありません。
 | 開いた PR | `Open`（GitHub の PR を開く） |
 
 - 「頼む」ボタンは、その依頼文を自分で入力したのと同じ形でこのセッションに送る（`$.prompt.submit`）。Claude が動いている間に押すと、そのターンが終わってから届く
-- 枠の下に、**他のセッションが書き出した後続**も並べる（アーカイブ済みのセッションの分も）。`Mark done` で消せる。セッションを開くリンクは付けられない（Desktop の枠は `https:` 以外のリンクを描かない）
+- 枠に出すのはこのセッションのものだけ。他のセッションが書き出した後続は出さない
 
 ## 後続
 
-「今やる作業は無いが、時間が経たないと結果が分からない確認」（3 日後に反応を見て値下げを決める / 数日使ってから効いたか確かめる など）。mod が登録するツール `mcp__archive-check__followup` で Claude が書き出し（`add` / `done` / `list`）、いつ書き出すかの指示を mod がシステムプロンプトに 1 節足す。後続はセッションをまたいで残る（mod の store に置く）。
+「今やる作業は無いが、時間が経たないと結果が分からない確認」（3 日後に反応を見て値下げを決める / 数日使ってから効いたか確かめる など）。mod が登録するツール `mcp__archive-check__followup` で Claude が書き出し（`add` / `done` / `list`）、いつ書き出すかの指示を mod がシステムプロンプトに 1 節足す。後続はセッションごとに mod の store に置き、CLI が止まって開き直しても残る。
 
 ## 設定
 
@@ -56,7 +56,7 @@ echo '{"language":"ja"}' | claude plugin configure archive-check@tanmen --values
 ## 読むもの・書くもの
 
 - 読むだけ:
-  - Desktop のセッションの記録（Windows は `%APPDATA%\Claude\claude-code-sessions\…\<セッション>.json`、macOS は `~/Library/Application Support/Claude/claude-code-sessions/…`）。このセッションの分と、後続を書き出した他のセッションの分（題とアーカイブ済みか）。アプリの内部のファイルで、形が変わると読めなくなる
+  - Desktop のセッションの記録（Windows は `%APPDATA%\Claude\claude-code-sessions\…\<セッション>.json`、macOS は `~/Library/Application Support/Claude/claude-code-sessions/…`）。このセッションの分だけ。アプリの内部のファイルで、形が変わると読めなくなる
   - `~/.claude/sessions/` の各 json（使うのはこの CLI の起動時刻だけ）
   - 作業フォルダの `git rev-parse` / `git status` / `git rev-list`、このセッションの会話とエージェントの一覧、設定 `guide` の Markdown
 - GitHub に問い合わせる: PR の状態を `gh pr view` で引く。このセッションの記録に載った開いている PR ごとに、同じ PR は 3 分に 1 回まで（判定は 1 分ごととツールの呼び出しのたび）。今のブランチに remote に無いコミットがあるときは、マージ済みの PR も引く。資格情報は gh が持ったままで、mod には渡らない
@@ -64,7 +64,7 @@ echo '{"language":"ja"}' | claude plugin configure archive-check@tanmen --values
 
 ## 必要なもの
 
-- Claude Code Desktop の Code タブ（手元で動くセッション）。ターミナルの Claude Code にも読み込まれ、札は出さないが、後続のツールとシステムプロンプトの 1 節は入り、判定（git など）も回る。ターミナルで書き出した後続は Desktop の枠の「他のセッションの後続」に出る
+- Claude Code Desktop の Code タブ（手元で動くセッション）。ターミナルの Claude Code にも読み込まれ、札は出さないが、後続のツールとシステムプロンプトの 1 節は入り、判定（git など）も回る。ターミナルで書き出した後続は Desktop の枠には出ない（そのセッションで `list` を呼ぶと読める）
 - PR を見るには `gh`（ログイン済み）
 - Claude Code 2.1.295（Windows 版 Desktop に同梱のもの）で確かめた。macOS の記録の場所は確かめていない。mod の API（function hooks）は early access で、版が上がると動かなくなることがある
 

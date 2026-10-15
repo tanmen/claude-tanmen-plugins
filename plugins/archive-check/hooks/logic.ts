@@ -1,5 +1,5 @@
 // $ を使わない判定。register.tsx が集めた材料から理由を組み立てる（テストはここを直接呼ぶ）
-import type { FollowUp, OtherSession, Reason, ReasonAction, Verdict } from '../types'
+import type { FollowUp, Reason, ReasonAction, Verdict } from '../types'
 import type { Messages } from './messages'
 
 export type ToolUseLite = { tool: string; input: Record<string, unknown>; text?: string; result?: unknown }
@@ -129,8 +129,6 @@ export function endedTaskIds(messages: readonly MessageLite[]): Set<string> {
 
 // Desktop の記録（<host session id>.json）のうち、判定に使う欄
 export type SessionRecord = {
-  title?: unknown
-  isArchived?: unknown
   backgroundTaskSuggestions?: { id?: unknown; title?: unknown; expiresAt?: unknown }[]
   prs?: { prNumber?: unknown; repo?: unknown; state?: unknown }[]
 }
@@ -211,31 +209,6 @@ export function isFollowUp(value: unknown): value is FollowUp {
 }
 
 export const FOLLOWUP_PREFIX = 'followups:'
-
-// $.store の全キーから、ほかのセッションの後続を束ねる（記録の isArchived は register.tsx が埋める）
-export function groupOthers(
-  entries: readonly { key: string; value: unknown }[],
-  ownCliId: string,
-  m: Messages,
-): Omit<OtherSession, 'isArchived'>[] {
-  const others: Omit<OtherSession, 'isArchived'>[] = []
-  for (const { key, value } of entries) {
-    if (!key.startsWith(FOLLOWUP_PREFIX)) continue
-    const cliId = key.slice(FOLLOWUP_PREFIX.length)
-    if (cliId === ownCliId || cliId === '') continue
-    const followups = Array.isArray(value) ? value.filter(isFollowUp) : []
-    if (followups.length === 0) continue
-    // 題と記録の名前は、いちばん新しく書き出した後続のもの
-    const latest = [...followups].reverse().find(f => f.hostId !== undefined || f.sessionTitle !== undefined)
-    others.push({
-      cliId,
-      ...(latest?.hostId ? { hostId: latest.hostId } : {}),
-      title: latest?.sessionTitle || m.sessionFallback(cliId.slice(0, 8)),
-      followups,
-    })
-  }
-  return others
-}
 
 // 設定のパスの頭の ~ をホームに置き換える
 export function expandHome(path: string, home: string): string {

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BackgroundTask, FollowUp, OtherSession, Reason, ReasonAction, Report, Verdict } from '../types'
+import type { BackgroundTask, FollowUp, Reason, ReasonAction, Report, Verdict } from '../types'
 import {
   askReasons,
   cardReasons,
@@ -9,7 +9,6 @@ import {
   expandHome,
   FOLLOWUP_PREFIX,
   followupReasons,
-  groupOthers,
   isFollowUp,
   parsePrStatus,
   pendingAsks,
@@ -24,7 +23,6 @@ import { langOf, MESSAGES } from './messages'
 import type { Messages } from './messages'
 
 const report = atom({ plugin: 'archive-check', key: 'report' } as const, null)
-const others = atom({ plugin: 'archive-check', key: 'others' } as const, [])
 const tasks = atom({ plugin: 'archive-check', key: 'tasks' } as const, [])
 
 const PANE = 'archive-check'
@@ -113,21 +111,6 @@ async function removeFollowupOf($: EngineInterface, cliId: string, id: string): 
   return found
 }
 
-// 後続に、書き出したセッションの記録の名前と題を添える（他のセッションの枠で使う）。題が変わっていれば直す
-async function stampFollowups($: EngineInterface, cliId: string, record: SessionRecord | null): Promise<void> {
-  const hostId = (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) ?? ''
-  const title = record !== null && typeof record.title === 'string' ? record.title : ''
-  if (hostId === '' && title === '') return
-  const list = await loadFollowupsOf($, cliId)
-  const isStale = list.some(f => (hostId !== '' && f.hostId !== hostId) || (title !== '' && f.sessionTitle !== title))
-  if (!isStale) return
-  await saveFollowupsOf(
-    $,
-    cliId,
-    list.map(f => ({ ...f, ...(hostId ? { hostId } : {}), ...(title ? { sessionTitle: title } : {}) })),
-  )
-}
-
 // 枠のボタンから Claude に頼む。届いたかを $.store の lastSubmit:<CLI のセッション id> に残す（道具の list で読める）。
 // 依頼文の本文は残さない（store は全セッション共通）
 async function submitPrompt($: EngineInterface, action: ReasonAction): Promise<void> {
@@ -162,7 +145,6 @@ async function handleFollowupTool($: EngineInterface, input: Record<string, unkn
     if (what === '') return { result: JSON.stringify({ error: 'what is empty' }) }
     const now = await $.clock.now()
     const dueAt = asString(input.due_at)
-    const hostId = (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) ?? ''
     const followup: FollowUp = {
       id: `f${now.toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`,
       what,
@@ -170,7 +152,6 @@ async function handleFollowupTool($: EngineInterface, input: Record<string, unkn
       how: asString(input.how),
       ...(dueAt ? { dueAt } : {}),
       createdAt: now,
-      ...(hostId ? { hostId } : {}),
     }
     list.push(followup)
     await saveFollowupsOf($, cliId, list)
@@ -230,19 +211,12 @@ async function findRecordPath($: EngineInterface): Promise<string | null> {
   return null
 }
 
-async function readRecordAt($: EngineInterface, path: string): Promise<SessionRecord | null> {
-  try {
-    const body: unknown = JSON.parse(await $.fs.read(path))
-    return typeof body === 'object' && body !== null ? (body as SessionRecord) : null
-  } catch {
-    return null
-  }
-}
-
 async function readRecord($: EngineInterface): Promise<SessionRecord | null> {
   try {
     const path = await findRecordPath($)
-    return path === null ? null : await readRecordAt($, path)
+    if (path === null) return null
+    const body: unknown = JSON.parse(await $.fs.read(path))
+    return typeof body === 'object' && body !== null ? (body as SessionRecord) : null
   } catch {
     return null
   }
@@ -269,32 +243,6 @@ async function readProcessStartedAt($: EngineInterface, cliId: string): Promise<
     }
   }
   return null
-}
-
-// ---- 他のセッションの後続
-
-async function loadOthers($: EngineInterface, cliId: string): Promise<OtherSession[]> {
-  const entries: { key: string; value: unknown }[] = []
-  for (const key of await $.store.keys()) {
-    if (key.startsWith(FOLLOWUP_PREFIX)) entries.push({ key, value: await $.store.get(key) })
-  }
-  const own = await findRecordPath($).catch(() => null)
-  const { sep } = await places($)
-  const dir = own === null ? null : own.slice(0, own.lastIndexOf(sep))
-  const sessions: OtherSession[] = []
-  for (const other of groupOthers(entries, cliId, m)) {
-    let isArchived: boolean | null = null
-    let title = other.title
-    if (dir !== null && other.hostId) {
-      const record = await readRecordAt($, `${dir}${sep}${other.hostId}.json`)
-      if (record !== null) {
-        isArchived = record.isArchived === true
-        if (typeof record.title === 'string' && record.title !== '') title = record.title
-      }
-    }
-    sessions.push({ ...other, title, isArchived })
-  }
-  return sessions
 }
 
 // ---- PR（gh）
@@ -366,7 +314,7 @@ async function workTreeReasons(
 
 // ---- 判定
 
-async function evaluate($: EngineInterface): Promise<{ report: Report; others: OtherSession[] }> {
+async function evaluate($: EngineInterface): Promise<Report> {
   const now = await $.clock.now()
   const cwd = await $.session.cwd()
   const cliId = await $.session.id()
@@ -426,7 +374,6 @@ async function evaluate($: EngineInterface): Promise<{ report: Report; others: O
     reasons.push(unread(m.unreadWhat.agents))
   }
 
-  await stampFollowups($, cliId, record).catch(() => undefined)
   reasons.push(...followupReasons(await loadFollowupsOf($, cliId), m))
   reasons.push(...askReasons(pendingAsks(messages, m)))
   const plan = replayPlan(messages)
@@ -434,10 +381,7 @@ async function evaluate($: EngineInterface): Promise<{ report: Report; others: O
   if (guideSetting !== '' && (await readGuide($)) === null) reasons.push(unread(m.unreadWhat.guide))
 
   const sorted = sortReasons(reasons)
-  return {
-    report: { verdict: verdictOf(sorted), reasons: sorted, checkedAt: now },
-    others: await loadOthers($, cliId).catch(() => []),
-  }
+  return { verdict: verdictOf(sorted), reasons: sorted, checkedAt: now }
 }
 
 let isEvaluating = false
@@ -452,18 +396,15 @@ async function runEvaluate($: EngineInterface): Promise<void> {
   isEvaluating = true
   try {
     // 判定ごと落ちたら、前の札を残さず「読めなかった」の Check にする
-    const next = await evaluate($).catch(async () => ({
-      report: { verdict: 'caution' as const, reasons: [unread(m.unreadWhat.evaluate)], checkedAt: await $.clock.now() },
-      others: (await read($, others)) ?? [],
+    const next = await evaluate($).catch(async (): Promise<Report> => ({
+      verdict: 'caution',
+      reasons: [unread(m.unreadWhat.evaluate)],
+      checkedAt: await $.clock.now(),
     }))
     const prev = await read($, report)
     const same =
-      prev !== null &&
-      prev.verdict === next.report.verdict &&
-      JSON.stringify(prev.reasons) === JSON.stringify(next.report.reasons)
-    if (!same) await update($, report, () => next.report)
-    const prevOthers = await read($, others)
-    if (JSON.stringify(prevOthers) !== JSON.stringify(next.others)) await update($, others, () => next.others)
+      prev !== null && prev.verdict === next.verdict && JSON.stringify(prev.reasons) === JSON.stringify(next.reasons)
+    if (!same) await update($, report, () => next)
   } finally {
     isEvaluating = false
     if (isQueued) {
@@ -586,7 +527,6 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Link, Text } = $.ui.resolve(e)
     const current = await read($, report)
-    const otherSessions = (await read($, others)) ?? []
     const cliId = await $.session.id()
 
     if (current === null) return <Text dimColor>{m.checking}</Text>
@@ -632,38 +572,6 @@ export const register: Register = (on, options) => {
         </Box>
       )
 
-    const otherSection =
-      otherSessions.length === 0 ? null : (
-        <Box flexDirection="column">
-          <Text bold>{m.sectionOthers}</Text>
-          {otherSessions.map(s => (
-            <Box flexDirection="column">
-              {/* Desktop は https: 以外のリンクを描かないので、セッションを開くリンク（claude://）は付けられない */}
-              <Box flexDirection="row" gap={1}>
-                <Text>{s.title}</Text>
-                {s.isArchived ? <Text dimColor>{m.archived}</Text> : null}
-              </Box>
-              {s.followups.map(f => (
-                <Box flexDirection="row" justifyContent="space-between" gap={2} paddingLeft={2}>
-                  <Box flexDirection="column" flexShrink={1}>
-                    <Text>{m.followup(f.what, f.when)}</Text>
-                    {f.how ? <Text dimColor>{f.how}</Text> : null}
-                  </Box>
-                  <Button
-                    key={`done:${s.cliId}:${f.id}`}
-                    label={m.markDone}
-                    onPress={async () => {
-                      await removeFollowupOf($, s.cliId, f.id)
-                      await runEvaluate($)
-                    }}
-                  />
-                </Box>
-              ))}
-            </Box>
-          ))}
-        </Box>
-      )
-
     return (
       <Box flexDirection="column" gap={1}>
         <Text bold color={current.verdict === 'ok' ? 'success' : current.verdict === 'caution' ? 'warning' : 'error'}>
@@ -672,7 +580,6 @@ export const register: Register = (on, options) => {
         {current.reasons.length === 0 ? <Text dimColor>{m.nothingLeft}</Text> : null}
         {section(m.sectionBlocked, 'error', blocked, 0)}
         {section(m.sectionCaution, 'warning', caution, blocked.length)}
-        {otherSection}
       </Box>
     )
   })

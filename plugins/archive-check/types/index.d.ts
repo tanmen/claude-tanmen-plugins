@@ -42,9 +42,6 @@ export type FollowUp = {
   // 決まっていれば ISO 8601（時差付き）
   dueAt?: string
   createdAt: number
-  // 書き出したセッション（Desktop の記録の名前と題）。他のセッションの枠に出すときに使う
-  hostId?: string
-  sessionTitle?: string
 }
 
 // この CLI のプロセスで起きた背景タスク（Bash / PowerShell の背景実行・Monitor）
@@ -61,18 +58,8 @@ export type Report = {
   checkedAt: number
 }
 
-// 他のセッションが書き出した後続（$.store は全セッション共通）
-export type OtherSession = {
-  cliId: string
-  hostId?: string
-  title: string
-  // Desktop の記録の isArchived。記録が読めなければ null
-  isArchived: boolean | null
-  followups: FollowUp[]
-}
-
 declare module 'claude-code' {
   interface PluginState {
-    'archive-check': { report: Report | null; others: OtherSession[]; tasks: BackgroundTask[] }
+    'archive-check': { report: Report | null; tasks: BackgroundTask[] }
   }
 }

@@ -36,7 +36,6 @@ const PANE = {
 } as const
 
 const RECORD = 'C:\\appdata\\Claude\\claude-code-sessions\\acc\\prof\\local_1.json'
-const OTHER_RECORD = 'C:\\appdata\\Claude\\claude-code-sessions\\acc\\prof\\local_2.json'
 const PID_FILE = 'C:\\home\\.claude\\sessions\\100.json'
 
 type World = {
@@ -44,7 +43,6 @@ type World = {
   unpushed?: number
   head?: string
   record?: object | null
-  otherRecord?: object
   files?: Record<string, string>
   store?: Record<string, unknown>
   messages?: MessageLite[]
@@ -68,7 +66,6 @@ function world(on: On, w: World = {}) {
     [PID_FILE]: JSON.stringify({ sessionId: 'cli-1', startedAt: 500_000 }),
   }
   if (w.record !== null) files[RECORD] = JSON.stringify(w.record ?? {})
-  if (w.otherRecord) files[OTHER_RECORD] = JSON.stringify(w.otherRecord)
   Object.assign(files, w.files ?? {})
 
   // 枠を開いた・閉じた・Claude に頼んだ記録
@@ -265,7 +262,7 @@ test('remote に無いコミットも、マージ済みの PR の head と同じ
 
 test('後続を書き出すと「注」になり、枠で予定に移すと Claude に頼み、済みにすると消える', JA, async ($, on) => {
   const submitted: string[] = []
-  const clock = world(on, { submitted, record: { title: 'このセッション' } })
+  const clock = world(on, { submitted })
   on('ui.render', () => ({ type: 'engine', ref: 0 }))
   await start($, clock)
 
@@ -290,9 +287,6 @@ test('後続を書き出すと「注」になり、枠で予定に移すと Clau
   const schedule = buttons.find(b => String(b.props.label) === '予定に移す')
   await pane.press({ key: String(schedule?.props.key) })
   expect(submitted[0]).toContain('後続「出品の反応を見て値下げを決める」を予定タスクに移して')
-
-  // 後続には書き出したセッションの記録の名前と題が付く（他のセッションの枠で使う）
-  expect(await listFollowups($)).toMatchObject({ followups: [{ hostId: 'local_1', sessionTitle: 'このセッション' }] })
 
   const done = buttons.find(b => String(b.props.label) === '済みにする')
   await pane.press({ key: String(done?.props.key) })
@@ -328,35 +322,27 @@ test('承認待ちの wrap_up の選択肢を、枠から返事として送れ�
   await pane.unmount()
 })
 
-test('他のセッションの後続を枠に並べ、アーカイブ済みかを添えて、済みにできる', JA, async ($, on) => {
+test('枠にはこのセッションの後続だけを出し、他のセッションの後続は出さない', JA, async ($, on) => {
   const clock = world(on, {
     store: {
+      'followups:cli-1': [{ id: 'f1', what: '効いたか確かめる', when: '数日後', how: '', createdAt: 1 }],
+      // 0.1.0 が書いた形（記録の名前と題つき）の、他のセッションの後続
       'followups:cli-2': [
-        { id: 'f1', what: '値下げを決める', when: '3 日後', how: 'いいねを見る', createdAt: 1, hostId: 'local_2', sessionTitle: '古い題' },
+        { id: 'f2', what: '値下げを決める', when: '3 日後', how: 'いいねを見る', createdAt: 2, hostId: 'local_2', sessionTitle: 'メルカリの出品' },
       ],
-      'followups:cli-3': [{ id: 'f2', what: '効いたか確かめる', when: '', how: '', createdAt: 2 }],
     },
-    otherRecord: { title: 'メルカリの出品', isArchived: true },
   })
   on('ui.render', () => ({ type: 'engine', ref: 0 }))
   await start($, clock)
 
   const pane = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...PANE })
-  expect(await pane.find({ type: 'Text', text: '他のセッションの後続' })).toBeDefined()
-  // 題は記録の今の題。記録の名前が無い古い後続は CLI の id の頭で出す
-  expect(await pane.find({ type: 'Text', text: 'メルカリの出品' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'アーカイブ済み' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'セッション cli-3' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: '値下げを決める（3 日後）' })).toBeDefined()
-  // 自分の後続は無いので「済」のまま（他のセッションの後続は判定に入れない）
-  expect(await pane.find({ type: 'Text', text: '作業済み' })).toBeDefined()
-
-  const done = (await pane.findAll({ type: 'Button' })).find(b => String(b.props.key) === 'done:cli-2:f1')
-  expect(done).toBeDefined()
-  await pane.press({ key: String(done?.props.key) })
-  await clock.settle()
+  expect(await pane.find({ type: 'Text', text: '効いたか確かめる（数日後）' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '値下げを決める（3 日後）' })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: 'メルカリの出品' })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: 'セッション cli-3' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'いいねを見る' })).toBeUndefined()
+  const keys = (await pane.findAll({ type: 'Button' })).map(b => String(b.props.key))
+  expect(keys).toContain('done:f1')
+  expect(keys.some(k => k.includes('f2'))).toBe(false)
   await pane.unmount()
 })
 
