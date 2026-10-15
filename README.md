@@ -11,6 +11,7 @@ Anthropic の公式のものではありません。
 | mod | 中身 |
 | --- | --- |
 | [usage-bars](plugins/usage-bars) | Claude Code Desktop の入力欄の上に context・5h・7d の使用率をバーで常時出す |
+| [archive-check](plugins/archive-check) | Claude Code Desktop の入力欄の上に、このセッションをアーカイブしてよいか（Done / Check / Busy）を札で出し、押すと右側の枠に理由と操作を並べる |
 
 ![usage-bars の帯](plugins/usage-bars/docs/screenshot.png)
 

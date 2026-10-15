@@ -7,6 +7,11 @@
       "name": "usage-bars",
       "source": "./plugins/usage-bars",
       "description": "Claude Code Desktop の入力欄の上に context・5h・7d の使用率をバーで常時出す"
+    },
+    {
+      "name": "archive-check",
+      "source": "./plugins/archive-check",
+      "description": "Claude Code Desktop の入力欄の上に、このセッションをアーカイブしてよいか（Done / Check / Busy）を札で出し、押すと右側の枠に理由と操作を並べる"
     }
   ]
 }

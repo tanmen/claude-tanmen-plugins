@@ -1,0 +1,26 @@
+{
+  "name": "archive-check",
+  "version": "0.1.0",
+  "description": "Claude Code Desktop の入力欄の上に、このセッションをアーカイブしてよいか（Done / Check / Busy）を札で出し、押すと右側の枠に理由と操作を並べる",
+  "author": { "name": "tanmen", "url": "https://github.com/tanmen" },
+  "homepage": "https://github.com/tanmen/claude-tanmen-plugins/tree/main/plugins/archive-check",
+  "repository": "https://github.com/tanmen/claude-tanmen-plugins",
+  "license": "MIT",
+  "keywords": ["archive", "follow-up", "session", "desktop"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "表示の言語 / Language",
+      "description": "en は英語（Done / Check / Busy）、ja は日本語（済 / 注 / 作）",
+      "options": ["en", "ja"],
+      "default": "en"
+    },
+    "guide": {
+      "type": "string",
+      "title": "後続の書き出し方の指示（Markdown のパス） / Follow-up guide (Markdown path)",
+      "description": "Claude に渡す「後続をいつ・どう書き出すか」の指示を、この Markdown の中身に差し替える。空なら既定の文。~ はホーム",
+      "default": ""
+    }
+  }
+}

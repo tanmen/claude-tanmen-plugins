@@ -1,0 +1,78 @@
+// Busy（作） = 畳むと作業を失う（blocked） / Check（注） = 畳んでよいが確認を忘れずに（caution） / Done（済） = どれも無い（ok）
+export type Verdict = 'ok' | 'caution' | 'blocked'
+
+export type ReasonKind =
+  | 'dirty'
+  | 'unpushed'
+  | 'card'
+  | 'task'
+  | 'followup'
+  | 'ci'
+  | 'ask'
+  | 'plan'
+  | 'pr'
+  | 'unread'
+
+// 枠のボタンで Claude に頼むこと。押すと prompt をこのセッションに送る
+export type ReasonAction = {
+  label: string
+  prompt: string
+}
+
+export type Reason = {
+  level: 'blocked' | 'caution'
+  kind: ReasonKind
+  text: string
+  // 補足（後続の確かめ方など）。枠で薄い字にする
+  note?: string
+  // 後続なら、その id（枠の「済みにする」「予定に移す」が使う）
+  followupId?: string
+  // 枠のボタン（Claude に頼む）
+  actions?: ReasonAction[]
+  // 枠のリンク（PR など）
+  href?: string
+}
+
+// 時間が経たないと分からない確認。Claude が mcp__archive-check__followup で書き出す
+export type FollowUp = {
+  id: string
+  what: string
+  when: string
+  how: string
+  // 決まっていれば ISO 8601（時差付き）
+  dueAt?: string
+  createdAt: number
+  // 書き出したセッション（Desktop の記録の名前と題）。他のセッションの枠に出すときに使う
+  hostId?: string
+  sessionTitle?: string
+}
+
+// この CLI のプロセスで起きた背景タスク（Bash / PowerShell の背景実行・Monitor）
+export type BackgroundTask = {
+  id: string
+  kind: 'shell' | 'monitor'
+  label: string
+  startedAt: number
+}
+
+export type Report = {
+  verdict: Verdict
+  reasons: Reason[]
+  checkedAt: number
+}
+
+// 他のセッションが書き出した後続（$.store は全セッション共通）
+export type OtherSession = {
+  cliId: string
+  hostId?: string
+  title: string
+  // Desktop の記録の isArchived。記録が読めなければ null
+  isArchived: boolean | null
+  followups: FollowUp[]
+}
+
+declare module 'claude-code' {
+  interface PluginState {
+    'archive-check': { report: Report | null; others: OtherSession[]; tasks: BackgroundTask[] }
+  }
+}
