@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import type { TestBody } from 'claude-code/testing'
+import type { Mounted, TestBody } from 'claude-code/testing'
 
 const BAND = {
   component: 'AbovePrompt',
@@ -376,7 +376,8 @@ test('バーを押すとリセットの日時を出し、同じバーをもう�
   await ui.unmount()
 })
 
-async function texts(ui: Awaited<ReturnType<Parameters<TestBody>[0]['ui']['mount']>>) {
+// findAll の形は描く部品によらない。mount の戻り値の型をそのまま書くと、tsc が帯の型を全部品の型に当てようとして落ちる
+async function texts(ui: Pick<Mounted, 'findAll'>) {
   return (await ui.findAll({ type: 'Text' })).map(text => text.text)
 }
 
