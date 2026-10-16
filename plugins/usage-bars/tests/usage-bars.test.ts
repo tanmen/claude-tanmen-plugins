@@ -475,3 +475,194 @@ test('右クリックでは開かない', async ($, on) => {
   expect(await texts(ui)).toEqual([])
   await ui.unmount()
 })
+
+// session.usage の答え。breakdown を頼まれたときだけ、手元の見積もり（totalTokens）を付ける
+function contextUsage(live: { tokens: number; percent: number } | null, estimatedTokens: number) {
+  return (e: { breakdown?: string }) => ({
+    startedAt: 0,
+    context: {
+      window: 1_000_000,
+      ...(live ?? {}),
+      ...(e.breakdown === undefined ? {} : { breakdown: { totalTokens: estimatedTokens } as never }),
+    },
+    rateLimits: [],
+  })
+}
+
+async function contextBar($: Parameters<TestBody>[0]) {
+  const ui = await $.ui.mount({ plugin: 'usage-bars', surface: 'desktop', ...BAND })
+  const [bar] = await ui.findAll({ type: 'Svg' })
+  await ui.unmount()
+  return { source: String(bar?.props.source), alt: String(bar?.props.alt) }
+}
+
+test('最初の応答の前は、context を手元の見積もりで灰色に出し、応答が来たら置き換える', async ($, on) => {
+  const clock = mock.clock(on)
+  sharedStore(on)
+  const asked: string[] = []
+  const usage = contextUsage(null, 46_844)
+  on('session.usage', ($, e) => {
+    if (e.breakdown !== undefined) asked.push(e.breakdown)
+    return { value: usage(e) }
+  })
+  on('session.authorize', () => ({ value: null }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('ui.render', () => ({ type: 'Box' }))
+
+  await $.session.start({ cwd: 'C:/work', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+
+  // 通信しない summary で数える
+  expect(asked).toEqual(['summary'])
+  const estimated = await contextBar($)
+  expect(estimated.source).toContain('>5%<')
+  expect(estimated.source).not.toContain('#5DCAA5')
+  expect(estimated.alt).toBe('context 5%（47K / 1M・応答の前の見積もり）')
+
+  // 詳細では使っている量に「約」を付ける
+  const ui = await $.ui.mount({ plugin: 'usage-bars', surface: 'desktop', ...BAND })
+  await ui.pointer({ type: 'up', x: 3, y: 0, button: 'left', in: 'hit-context' })
+  const section = (await ui.findAll({ type: 'Svg' })).find(svg => String(svg.props.alt).startsWith('コンテキスト'))
+  expect(String(section?.props.alt)).toBe('コンテキスト 約 47K / 1M')
+  await ui.press({ key: 'close' })
+  await ui.unmount()
+
+  await $.session.measure({ context: { tokens: 85_968, window: 1_000_000, percent: 9 }, rateLimits: [], changed: ['context'] })
+  const live = await contextBar($)
+  expect(live.source).toContain('>9%<')
+  expect(live.source).toContain('#5DCAA5')
+  expect(live.alt).toBe('context 9%（86K / 1M）')
+})
+
+test('応答の値が先に届いていれば、遅れて返った見積もりで上書きしない', async ($, on) => {
+  const clock = mock.clock(on)
+  sharedStore(on)
+  let release = () => {}
+  const gate = new Promise<void>(resolve => {
+    release = resolve
+  })
+  const usage = contextUsage(null, 46_844)
+  on('session.usage', async ($, e) => {
+    if (e.breakdown !== undefined) await gate
+    return { value: usage(e) }
+  })
+  on('session.authorize', () => ({ value: null }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('ui.render', () => ({ type: 'Box' }))
+
+  await $.session.start({ cwd: 'C:/work', surface: 'desktop', isInteractive: true })
+  await $.session.measure({ context: { tokens: 85_968, window: 1_000_000, percent: 9 }, rateLimits: [], changed: ['context'] })
+  release()
+  await clock.settle()
+
+  const bar = await contextBar($)
+  expect(bar.source).toContain('>9%<')
+  expect(bar.source).toContain('#5DCAA5')
+})
+
+test('compact の直後で応答の値が無くなったら、見積もりに戻す（開いた時点の差は足さない）', async ($, on) => {
+  const clock = mock.clock(on)
+  // compact の後は MCP もメッセージも数えに入っているので、差を足すと多く出る
+  sharedStore(on, { contextGap: 27_340 })
+  const usage = contextUsage({ tokens: 300_000, percent: 30 }, 60_000)
+  on('session.usage', ($, e) => ({ value: usage(e) }))
+  on('session.authorize', () => ({ value: null }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('ui.render', () => ({ type: 'Box' }))
+
+  // 応答の値があるうちは数えない
+  await $.session.start({ cwd: 'C:/work', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  expect((await contextBar($)).source).toContain('>30%<')
+
+  await $.session.measure({ context: { window: 1_000_000 }, rateLimits: [], changed: ['context'] })
+  await clock.settle()
+  const bar = await contextBar($)
+  expect(bar.source).toContain('>6%<')
+  expect(bar.source).not.toContain('#5DCAA5')
+})
+
+test('応答が届くまでは 5 秒ごとに見積もりを数え直し、届いたら数えない', async ($, on) => {
+  const clock = mock.clock(on)
+  sharedStore(on)
+  let estimatedTokens = 58_523
+  let asked = 0
+  on('session.usage', ($, e) => {
+    if (e.breakdown !== undefined) asked += 1
+    return { value: contextUsage(null, estimatedTokens)(e) }
+  })
+  on('session.authorize', () => ({ value: null }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('ui.render', () => ({ type: 'Box' }))
+
+  await $.session.start({ cwd: 'C:/work', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  expect((await contextBar($)).source).toContain('>6%<')
+
+  // 開始のあとに MCP のツールが繋がった
+  estimatedTokens = 80_557
+  await clock.advance(5_000)
+  const later = await contextBar($)
+  expect(later.source).toContain('>8%<')
+  expect(later.source).not.toContain('#5DCAA5')
+
+  await $.session.measure({ context: { tokens: 85_859, window: 1_000_000, percent: 9 }, rateLimits: [], changed: ['context'] })
+  const before = asked
+  await clock.advance(15_000)
+  expect(asked).toBe(before)
+  expect((await contextBar($)).source).toContain('>9%<')
+})
+
+test('最初の応答で、開いた時点の見積もりとの差を共有の記録に残す', async ($, on) => {
+  const clock = mock.clock(on)
+  const store = sharedStore(on)
+  on('session.usage', ($, e) => ({ value: contextUsage(null, 58_523)(e) }))
+  on('session.authorize', () => ({ value: null }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('ui.render', () => ({ type: 'Box' }))
+
+  await $.session.start({ cwd: 'C:/work', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  // 応答が失敗した（値が無い）回では記録しない
+  await $.session.measure({ context: { window: 1_000_000 }, rateLimits: [], changed: ['context'] })
+  expect(store.get('contextGap')).toBeUndefined()
+
+  await $.session.measure({ context: { tokens: 85_863, window: 1_000_000, percent: 9 }, rateLimits: [], changed: ['context'] })
+  expect(store.get('contextGap')).toBe(27_340)
+  // 2 回目の応答では記録し直さない
+  await $.session.measure({ context: { tokens: 97_442, window: 1_000_000, percent: 10 }, rateLimits: [], changed: ['context'] })
+  expect(store.get('contextGap')).toBe(27_340)
+})
+
+test('前のセッションの差を、開いた時点の見積もりに足す', async ($, on) => {
+  const clock = mock.clock(on)
+  sharedStore(on, { contextGap: 27_340 })
+  let estimatedTokens = 58_523
+  on('session.usage', ($, e) => ({ value: contextUsage(null, estimatedTokens)(e) }))
+  on('session.authorize', () => ({ value: null }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('ui.render', () => ({ type: 'Box' }))
+
+  await $.session.start({ cwd: 'C:/work', surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const atStart = await contextBar($)
+  expect(atStart.source).toContain('>9%<')
+  expect(atStart.source).not.toContain('#5DCAA5')
+  expect(atStart.alt).toBe('context 9%（86K / 1M・応答の前の見積もり）')
+
+  // MCP のツールが繋がって数えた値が増えても、差を二重に足さない
+  estimatedTokens = 79_367
+  await clock.advance(5_000)
+  expect((await contextBar($)).source).toContain('>9%<')
+
+  // 最初のターンで差より増えたら、数えた値を出す
+  estimatedTokens = 120_000
+  await clock.advance(5_000)
+  expect((await contextBar($)).source).toContain('>12%<')
+})

@@ -8,6 +8,8 @@ export type UsageSnapshot = {
   contextPercent: number | null
   contextTokens: number | null
   contextWindow: number
+  // 応答の値がまだ無い間（最初の応答の前・compact の直後）に、手元の見積もりで埋めた context なら true
+  isContextEstimated: boolean
   windows: UsageWindow[]
   // windows を読んだ時刻（ms）。このセッションの応答・使用量 API・別のセッションの記録のうち一番新しいもの。
   // 前のセッションから持ち越して、まだ読み直せていない値なら isCarriedOver

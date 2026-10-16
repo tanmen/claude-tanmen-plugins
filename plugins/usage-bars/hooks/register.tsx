@@ -11,6 +11,10 @@ const detail = atom({ plugin: 'usage-bars', key: 'detail' } as const, null)
 const STORED_WINDOWS = 'windows'
 // 使用量 API を読みに行った時刻。全セッションが同じ時に読みに行かないよう、先に書いておく
 const FETCH_CLAIM = 'fetchClaim'
+// 開いた時点の context の見積もりと、最初の応答の値の差（トークン数）。MCP のツールは開いたあとに繋がり、
+// 最初のメッセージも見積もりに入らないので、そのぶん少なく出る（Desktop の実測で 58.5K → 85.9K）。
+// 全セッションで共有し、次のセッションの開いた時点の見積もりに足す
+const CONTEXT_GAP = 'contextGap'
 
 // /usage が読むのと同じ口。応答を待たずに 5h / 7d が読める
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -20,6 +24,8 @@ const DETAIL_REFRESH_MS = 60_000
 const CLAIM_MS = 60_000
 // 帯がこの間描かれていなければ、見られていないとみて API は読みに行かない（別のセッションの値は取り込む）
 const VISIBLE_MS = 2 * 60_000
+// 応答の値が届くまで、context の見積もりをこの間隔で数え直す（最初のターンで増えていく分を追う）
+const ESTIMATE_MS = 5_000
 
 const WINDOWS = [
   { kind: 'five_hour', label: '5h', title: '5 時間の利用枠' },
@@ -64,7 +70,8 @@ type Meter = {
   detail: string
   // 読み上げ用の全文。削った情報（トークン数・リセット時刻）はここに残す
   alt: string
-  isCarriedOver: boolean
+  // 前のセッションから持ち越した値や、応答の前の見積もり。今の値と見分けられるよう色を落とす
+  isTentative: boolean
 }
 
 type StoredWindows = { windows: UsageWindow[]; readAt: number }
@@ -176,33 +183,34 @@ function percentText(percent: number | null): string {
 
 function contextMeter(snap: UsageSnapshot): Meter {
   const used = snap.contextTokens === null ? '--' : formatTokens(snap.contextTokens)
+  const suffix = snap.isContextEstimated ? '・応答の前の見積もり' : ''
   return {
     kind: 'context',
     label: 'context',
     percent: snap.contextPercent,
     detail: '',
-    alt: `context ${percentText(snap.contextPercent)}（${used} / ${formatTokens(snap.contextWindow)}）`,
-    isCarriedOver: false,
+    alt: `context ${percentText(snap.contextPercent)}（${used} / ${formatTokens(snap.contextWindow)}${suffix}）`,
+    isTentative: snap.isContextEstimated,
   }
 }
 
 function windowMeter(snap: UsageSnapshot, kind: (typeof WINDOWS)[number]['kind'], label: string, now: number): Meter {
   const win = snap.windows.find(w => w.kind === kind)
   if (win === undefined) {
-    return { kind, label, percent: null, detail: '', alt: `${label} まだ値がない`, isCarriedOver: false }
+    return { kind, label, percent: null, detail: '', alt: `${label} まだ値がない`, isTentative: false }
   }
 
   const isCarriedOver = snap.isCarriedOver
   const suffix = isCarriedOver ? '・前回のセッションの値' : ''
   if (win.resetsAt === undefined) {
-    return { kind, label, percent: win.percentUsed, detail: '', alt: `${label} ${percentText(win.percentUsed)}${suffix}`, isCarriedOver }
+    return { kind, label, percent: win.percentUsed, detail: '', alt: `${label} ${percentText(win.percentUsed)}${suffix}`, isTentative: isCarriedOver }
   }
 
   // 使用量 API は 04:59:59.9 のような時刻で返すので、分に丸める
   const resetsAt = roundToMinute(Date.parse(win.resetsAt))
   // 持ち越した値の窓がもう切り替わっていれば、使用率は 0 から数え直しになっている
   if (resetsAt <= now) {
-    return { kind, label, percent: 0, detail: '', alt: `${label} 0%（リセット済み）`, isCarriedOver }
+    return { kind, label, percent: 0, detail: '', alt: `${label} 0%（リセット済み）`, isTentative: isCarriedOver }
   }
 
   const remaining = formatRemaining(resetsAt - now)
@@ -213,7 +221,7 @@ function windowMeter(snap: UsageSnapshot, kind: (typeof WINDOWS)[number]['kind']
     percent: win.percentUsed,
     detail: remaining,
     alt: `${label} ${percentText(win.percentUsed)}（あと ${remaining}・${clock} にリセット${suffix}）`,
-    isCarriedOver,
+    isTentative: isCarriedOver,
   }
 }
 
@@ -234,7 +242,7 @@ function contextSvg(open: Detail, snap: UsageSnapshot): { source: string; alt: s
   const parts: string[] = []
   const alt: string[] = []
   const used = snap.contextTokens === null ? '--' : formatTokens(snap.contextTokens)
-  const summary = `${used} / ${formatTokens(snap.contextWindow)}`
+  const summary = `${snap.isContextEstimated ? '約 ' : ''}${used} / ${formatTokens(snap.contextWindow)}`
   // 右寄せの 1 かたまりで、自動 compact を使っている量の左に置く
   const compact = open.autoCompactAt === null ? null : `${formatTokens(open.autoCompactAt)} で自動 compact`
   const compactSpan = compact === null ? '' : `<tspan font-size="11">${escapeXml(compact)}</tspan><tspan dx="14">`
@@ -286,8 +294,8 @@ function contextSvg(open: Detail, snap: UsageSnapshot): { source: string; alt: s
 }
 
 function toneOf(meter: Meter) {
-  // 前のセッションから持ち越した値は今の値と見分けられるよう、色を落とす
-  if (meter.percent === null || meter.isCarriedOver) return TONES.none
+  // 前のセッションから持ち越した値・応答の前の見積もりは、今の値と見分けられるよう色を落とす
+  if (meter.percent === null || meter.isTentative) return TONES.none
   // 表示する数字（四捨五入）で判定する。79.6 を「80%」と出しながら黄にしない
   const shown = Math.round(meter.percent)
   if (shown >= 80) return TONES.high
@@ -352,6 +360,11 @@ function meterSvg(meter: Meter, size: Size, isSelected: boolean): string {
 // 共有の値も出さず、使用量 API も読まない
 let isPlanless = false
 let lastDrawnAt = 0
+// このセッションを開いた時点の見積もりと、それに足す差。最初の応答の値が届くまでだけ使う
+// （compact の後は MCP もメッセージも見積もりに入っているので、差は足さない）
+let isBeforeFirstResponse = true
+let startEstimate: number | null = null
+let startGap = 0
 
 // 別のセッションが記録した新しい値を取り込み、それでも古ければ使用量 API を読む（maxAgeMs が null なら読まない）
 async function refreshWindows($: EngineInterface, maxAgeMs: number | null): Promise<void> {
@@ -383,6 +396,32 @@ async function tick($: EngineInterface): Promise<void> {
   $.ui.invalidate('ui.render')
 }
 
+// 応答の値が無い間（最初の応答の前・compact の直後）は、/context と同じ分け方の手元の見積もり（通信しない）で埋める。
+// 応答の値がもう入っていれば数えないし、数えている間に届いても上書きしない
+async function estimateContext($: EngineInterface): Promise<void> {
+  const current = await read($, snapshot)
+  if (current === null || (current.contextPercent !== null && !current.isContextEstimated)) return
+  const { context } = await $.session.usage({ breakdown: 'summary' })
+  const counted = context.breakdown?.totalTokens
+  if (counted === undefined || context.window <= 0) return
+  let tokens = counted
+  if (isBeforeFirstResponse) {
+    if (startEstimate === null) {
+      startEstimate = counted
+      const gap = await $.store.get(CONTEXT_GAP)
+      startGap = typeof gap === 'number' && gap > 0 && gap < context.window ? gap : 0
+    }
+    // 数え直して MCP の分が入ってきても差を二重に足さない。最初のターンで差より増えたら、数えた値を出す
+    tokens = Math.max(startEstimate + startGap, counted)
+  }
+  await update($, snapshot, prev => {
+    if (prev === null || (prev.contextPercent !== null && !prev.isContextEstimated)) return prev
+    // 応答の値と同じく、モデルの窓に対する割合（内訳の percentage は compact の窓に対する割合で、窓が小さいとずれる）
+    const contextPercent = (tokens / context.window) * 100
+    return { ...prev, contextPercent, contextTokens: tokens, contextWindow: context.window, isContextEstimated: true }
+  })
+}
+
 async function countContext($: EngineInterface): Promise<void> {
   const breakdown = (await $.session.usage({ breakdown: 'summary' })).context.breakdown
   const categories = (breakdown?.categories ?? [])
@@ -409,6 +448,7 @@ export const register: Register = (on, options) => {
       contextPercent: usage.context.percent ?? null,
       contextTokens: usage.context.tokens ?? null,
       contextWindow: usage.context.window,
+      isContextEstimated: false,
       windows: carried?.windows ?? live,
       windowsReadAt: carried?.readAt ?? (live.length > 0 ? now : null),
       // 別のセッションが少し前に読んだ値なら、今の値として出す
@@ -417,6 +457,12 @@ export const register: Register = (on, options) => {
 
     // 最初の応答を待たずに、使用量 API で 5h / 7d を読む
     void refreshWindows($, REFRESH_MS).catch(() => undefined)
+    // 読み直し（hot reload）や再開で、もう応答の値があれば見積もらない
+    isBeforeFirstResponse = usage.context.percent === undefined
+    startEstimate = null
+    startGap = 0
+    void estimateContext($).catch(() => undefined)
+    $.clock.every(ESTIMATE_MS, () => void estimateContext($).catch(() => undefined))
 
     $.clock.every(60_000, () => void tick($))
 
@@ -429,12 +475,23 @@ export const register: Register = (on, options) => {
     // 応答が来たのに 5h / 7d が空なら、この認証には利用枠が無い（API キーなど）。持ち越した値はもう出さない
     const hasNoWindows = live.length === 0 && e.context.tokens !== undefined
 
+    // 応答の値が無い（compact の直後・応答が失敗した）。見積もりを出していればそのまま残し、数え直す
+    const hasNoContext = e.context.percent === undefined
+
+    // 最初の応答の値で、開いた時点の見積もりとの差を記録する（次のセッションの見積もりに足す）
+    if (isBeforeFirstResponse && e.context.tokens !== undefined) {
+      isBeforeFirstResponse = false
+      if (startEstimate !== null) await $.store.set(CONTEXT_GAP, Math.max(0, e.context.tokens - startEstimate))
+    }
+
     await update($, snapshot, prev => {
       const kept = prev !== null && !(hasNoWindows && prev.isCarriedOver) ? prev : null
+      const estimated = hasNoContext && prev?.isContextEstimated === true ? prev : null
       return {
-        contextPercent: e.context.percent ?? null,
-        contextTokens: e.context.tokens ?? null,
+        contextPercent: estimated?.contextPercent ?? e.context.percent ?? null,
+        contextTokens: estimated?.contextTokens ?? e.context.tokens ?? null,
         contextWindow: e.context.window,
+        isContextEstimated: estimated !== null,
         windows: live.length > 0 ? live : (kept?.windows ?? []),
         windowsReadAt: live.length > 0 ? now : (kept?.windowsReadAt ?? null),
         isCarriedOver: live.length > 0 ? false : (kept?.isCarriedOver ?? false),
@@ -446,6 +503,7 @@ export const register: Register = (on, options) => {
       await $.store.set(STORED_WINDOWS, value)
     }
 
+    if (hasNoContext) void estimateContext($).catch(() => undefined)
     // 開いている context の内訳を数え直す
     if ((await read($, detail))?.kind === 'context') void countContext($).catch(() => undefined)
 
