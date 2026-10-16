@@ -15,8 +15,8 @@ Anthropic の公式のものではありません。
 | `Done` / `済` | どれも無い | |
 
 - 材料（Desktop の記録・git・PR の状態・会話・設定 `guide` の Markdown）が読めなかったとき、判定が途中で失敗したときは `Done` にせず `Check` にして、枠に何が読めなかったかを出す。git の管理外のフォルダは「失うものが無い」として扱う
-- 1 分ごとと、ツールの呼び出し・ターンの終わり・背景タスクの知らせが届いたときに判定し直す
-- 背景タスクの終わりの知らせは、Claude が作業している最中に届いても拾う（その知らせは会話の記録には残らず、届いた時点でしか読めない）
+- 1 分ごとと、ツールの呼び出し・ターンの終わり・背景タスクの終わりの知らせが届いたときに判定し直す
+- 背景タスクの終わりの知らせは、Claude が作業している最中に届いても拾う（その知らせは mod が読める会話の行 `$.session.messages()` には出ず、届いた時点でしか拾えない）
 
 ## 右側の枠
 
@@ -72,7 +72,7 @@ echo '{"language":"ja"}' | claude plugin configure archive-check@tanmen --values
   - Desktop のセッションの記録（Windows は `%APPDATA%\Claude\claude-code-sessions\…\<セッション>.json`、macOS は `~/Library/Application Support/Claude/claude-code-sessions/…`）。このセッションの分だけ。アプリの内部のファイルで、形が変わると読めなくなる
   - `~/.claude/sessions/` の各 json（使うのはこの CLI の起動時刻だけ）
   - 作業フォルダの `git rev-parse` / `git status` / `git rev-list`、このセッションの会話（ツールの呼び出しと結果を含む）とエージェントの一覧、設定 `guide` の Markdown
-  - このセッションに入ってくるプロンプトのうち、背景タスクの知らせ（`prompt.submit` の origin が `task-notification` のもの）の本文。ほかのプロンプトは読まず、どれも止めも書き換えもしない
+  - このセッションに入ってくるプロンプトのうち、`prompt.submit` の origin が `task-notification` のものの本文（背景タスクやエージェントの終わりのほか、Artifact のコメントや check-in など、Claude Code が差し込む知らせも同じ origin で届く）。拾うのは `<task-notification>` の中の task-id と status だけで、本文は残さない。ほかの origin のプロンプトは読まず、どれも止めも書き換えもしない
 - GitHub に問い合わせる: PR の状態を `gh pr view` で引く。このセッションの記録に載った開いている PR ごとに、同じ PR は 3 分に 1 回まで（判定は 1 分ごととツールの呼び出しのたび）。今のブランチに remote に無いコミットがあるときは、マージ済みの PR も引く。資格情報は gh が持ったままで、mod には渡らない
 - 書く: mod 自身の store（後続、枠に出さなくなった Artifact の id、このセッションで最後に「頼む」ボタンを押した結果。依頼文の本文は残さない）だけ。アプリの記録やリポジトリには書かない
 
