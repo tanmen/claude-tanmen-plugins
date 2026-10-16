@@ -10,12 +10,13 @@ Anthropic の公式のものではありません。
 
 | 札（en / ja） | 意味 | 何で決まるか |
 | --- | --- | --- |
-| `Busy` / `作` | アーカイブすると作業を失う | 未コミットの変更 / 今のブランチ（HEAD）の、remote に無いコミット（HEAD がマージ済みの PR の head と同じなら除く）/ 未起動の提案カード（期限切れは除く）/ 動いている背景タスク（`run_in_background` の Bash・PowerShell と Monitor）/ 動いているエージェント |
+| `Busy` / `作` | アーカイブすると作業を失う | 未コミットの変更 / 今のブランチ（HEAD）の、remote に無いコミット（HEAD がマージ済みの PR の head と同じなら除く）/ 未起動の提案カード（期限切れは除く）/ 動いている背景タスク（`run_in_background` の Bash・PowerShell と Monitor。終わりの知らせが届くか、TaskStop で止めるまで）/ 動いているエージェント |
 | `Check` / `注` | アーカイブしてよいが、先に確かめること | 後続 / このセッションで作った Artifact（片付けを頼むか残すまで）/ 開いた PR の CI が終わっていない / 返事待ち（最後の wrap_up の質問・AskUserQuestion・「新しいセッションか、ここでやるか」）/ タスク一覧の残り / 開いた PR / 材料が読めなかった |
 | `Done` / `済` | どれも無い | |
 
 - 材料（Desktop の記録・git・PR の状態・会話・設定 `guide` の Markdown）が読めなかったとき、判定が途中で失敗したときは `Done` にせず `Check` にして、枠に何が読めなかったかを出す。git の管理外のフォルダは「失うものが無い」として扱う
-- 1 分ごとと、ツールの呼び出し・ターンの終わりに判定し直す
+- 1 分ごとと、ツールの呼び出し・ターンの終わり・背景タスクの終わりの知らせが届いたときに判定し直す
+- 背景タスクの終わりの知らせは、Claude が作業している最中に届いても拾う（その知らせは mod が読める会話の行 `$.session.messages()` には出ず、届いた時点でしか拾えない）
 
 ## 右側の枠
 
@@ -71,6 +72,7 @@ echo '{"language":"ja"}' | claude plugin configure archive-check@tanmen --values
   - Desktop のセッションの記録（Windows は `%APPDATA%\Claude\claude-code-sessions\…\<セッション>.json`、macOS は `~/Library/Application Support/Claude/claude-code-sessions/…`）。このセッションの分だけ。アプリの内部のファイルで、形が変わると読めなくなる
   - `~/.claude/sessions/` の各 json（使うのはこの CLI の起動時刻だけ）
   - 作業フォルダの `git rev-parse` / `git status` / `git rev-list`、このセッションの会話（ツールの呼び出しと結果を含む）とエージェントの一覧、設定 `guide` の Markdown
+  - このセッションに入ってくるプロンプトのうち、`prompt.submit` の origin が `task-notification` のものの本文（背景タスクやエージェントの終わりのほか、Artifact のコメントや check-in など、Claude Code が差し込む知らせも同じ origin で届く）。拾うのは `<task-notification>` の中の task-id と status だけで、本文は残さない。ほかの origin のプロンプトは読まず、どれも止めも書き換えもしない
 - GitHub に問い合わせる: PR の状態を `gh pr view` で引く。このセッションの記録に載った開いている PR ごとに、同じ PR は 3 分に 1 回まで（判定は 1 分ごととツールの呼び出しのたび）。今のブランチに remote に無いコミットがあるときは、マージ済みの PR も引く。資格情報は gh が持ったままで、mod には渡らない
 - 書く: mod 自身の store（後続、枠に出さなくなった Artifact の id、このセッションで最後に「頼む」ボタンを押した結果。依頼文の本文は残さない）だけ。アプリの記録やリポジトリには書かない
 
@@ -78,7 +80,7 @@ echo '{"language":"ja"}' | claude plugin configure archive-check@tanmen --values
 
 - Claude Code Desktop の Code タブ（手元で動くセッション）。ターミナルの Claude Code にも読み込まれ、札は出さないが、後続のツールとシステムプロンプトの 1 節は入り、判定（git など）も回る。ターミナルで書き出した後続は Desktop の枠には出ない（そのセッションで `list` を呼ぶと読める）
 - PR を見るには `gh`（ログイン済み）
-- Claude Code 2.1.295（Windows 版 Desktop に同梱のもの）で確かめた。macOS の記録の場所は確かめていない。mod の API（function hooks）は early access で、版が上がると動かなくなることがある
+- Claude Code 2.1.295（Windows 版 Desktop に同梱のもの）で確かめた。背景タスクの知らせの届き方は 2.1.299 で確かめた。macOS の記録の場所は確かめていない。mod の API（function hooks）は early access で、版が上がると動かなくなることがある
 
 ## usage-bars と並べる
 

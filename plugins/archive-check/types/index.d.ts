@@ -63,6 +63,7 @@ export type Report = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'archive-check': { report: Report | null; tasks: BackgroundTask[] }
+    // ended: 知らせ（prompt.submit）で終わりが分かった背景タスクの id
+    'archive-check': { report: Report | null; tasks: BackgroundTask[]; ended: string[] }
   }
 }

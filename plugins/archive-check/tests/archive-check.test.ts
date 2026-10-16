@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 
-import { endedTaskIds, parsePrStatus, pendingAsks, publishedArtifacts, replayPlan } from '../hooks/logic'
+import { endedInNotification, endedTaskIds, parsePrStatus, pendingAsks, publishedArtifacts, replayPlan } from '../hooks/logic'
 import type { MessageLite } from '../hooks/logic'
 import { MESSAGES } from '../hooks/messages'
 
@@ -526,6 +526,61 @@ test('guide の Markdown が読めなければ既定の文を渡し、枠に読�
   await pane.unmount()
 })
 
+// 背景タスクの知らせ（transcript に残る形と同じ並び）
+const notification = (id: string, status: string) =>
+  [
+    '<task-notification>',
+    `<task-id>${id}</task-id>`,
+    '<tool-use-id>toolu_1</tool-use-id>',
+    `<output-file>C:\\temp\\tasks\\${id}.output</output-file>`,
+    `<status>${status}</status>`,
+    `<summary>Background command "待つ" ${status}</summary>`,
+    '</task-notification>',
+  ].join('\n')
+
+test('ターン中に届いた背景タスクの知らせで、動いている背景タスクから外れる', JA, async ($, on) => {
+  const clock = world(on, { isRepo: false })
+  on('ui.render', () => ({ type: 'engine', ref: 0 }))
+  // 背景で走らせた Bash は、記録に backgroundTaskId を持って返る
+  on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg1' } as never }))
+  await start($, clock)
+
+  await $.tool.call({ tool: 'Bash', command: 'sleep 30', description: '待つ', run_in_background: true } as never)
+  await clock.advance(2_000)
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...BAND })
+  expect((await badge(ui)).source).toContain('>作<')
+
+  // まだ動いている知らせ（Monitor の途中経過など）では外さない
+  await $.prompt.submit({ text: notification('bg1', 'running'), origin: { kind: 'task-notification' }, turnId: 'turn-1', wait: false } as never)
+  await clock.advance(0)
+  await clock.settle()
+  expect((await badge(ui)).source).toContain('>作<')
+
+  // 走っているターンに届いた知らせ（turnId あり）は会話の行にならない。ここでも $.session.messages() は空のまま
+  await $.prompt.submit({ text: notification('bg1', 'completed'), origin: { kind: 'task-notification' }, turnId: 'turn-1', wait: false } as never)
+  await clock.advance(0)
+  await clock.settle()
+  expect((await badge(ui)).source).toContain('>済<')
+  await ui.unmount()
+})
+
+test('知らせ以外の入力に知らせの形の文があっても、背景タスクは外さない', JA, async ($, on) => {
+  const clock = world(on, { isRepo: false })
+  on('ui.render', () => ({ type: 'engine', ref: 0 }))
+  on('tool.call', () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg1' } as never }))
+  await start($, clock)
+
+  await $.tool.call({ tool: 'Bash', command: 'sleep 30', description: '待つ', run_in_background: true } as never)
+  // 本人が知らせを貼り付けて送った
+  await $.prompt.submit({ text: notification('bg1', 'completed'), origin: { kind: 'composer' }, wait: false } as never)
+  await clock.advance(2_000)
+  await clock.settle()
+  const pane = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...PANE })
+  expect(await pane.find({ type: 'Text', text: '動いている背景タスク「待つ」' })).toBeDefined()
+  await pane.unmount()
+})
+
 // ---- 判定の部品
 
 const use = (tool: string, input: Record<string, unknown>, text?: string) => ({ tool, input, ...(text === undefined ? {} : { text }) })
@@ -606,6 +661,9 @@ test('背景タスクの終わりを知らせと TaskStop から引く', () => {
   ].join('\n')
   const ended = endedTaskIds([user(note), assistant(use('TaskStop', { task_id: 'b2' }, 'ok'))])
   expect([...ended].sort()).toEqual(['b1', 'b2'])
+  // 知らせの本文 1 つに複数のタスク（idle の間に溜まった分）
+  expect(endedInNotification(`${notification('a1', 'completed')}\n${notification('a2', 'failed')}\n${notification('a3', 'running')}`)).toEqual(['a1', 'a2'])
+  expect(endedInNotification('ただの文')).toEqual([])
 })
 
 test('PR の CI が終わっていないかを statusCheckRollup から読む', () => {

@@ -106,17 +106,24 @@ export function askReasons(asks: readonly PendingAsk[]): Reason[] {
 // 終わった背景タスクの id: <task-notification> の status と、TaskStop で止めたもの
 const RUNNING_STATUSES = new Set(['running', 'started', 'pending', 'event'])
 
+// 知らせの本文から、終わったと書かれた背景タスクの id を拾う
+export function endedInNotification(text: string): string[] {
+  if (!text.includes('<task-notification>')) return []
+  const ids: string[] = []
+  for (const block of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+    const body = block[1] ?? ''
+    const id = /<task-id>([^<]+)<\/task-id>/.exec(body)?.[1]?.trim()
+    const status = /<status>([^<]+)<\/status>/.exec(body)?.[1]?.trim().toLowerCase()
+    if (id && status && !RUNNING_STATUSES.has(status)) ids.push(id)
+  }
+  return ids
+}
+
+// 会話の行に残るのは、idle のときに届いた知らせだけ（ターン中に届いたものは添付になり、行に出ない）
 export function endedTaskIds(messages: readonly MessageLite[]): Set<string> {
   const ended = new Set<string>()
   for (const m of messages) {
-    if (m.role === 'user' && m.text.includes('<task-notification>')) {
-      for (const block of m.text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
-        const body = block[1] ?? ''
-        const id = /<task-id>([^<]+)<\/task-id>/.exec(body)?.[1]?.trim()
-        const status = /<status>([^<]+)<\/status>/.exec(body)?.[1]?.trim().toLowerCase()
-        if (id && status && !RUNNING_STATUSES.has(status)) ended.add(id)
-      }
-    }
+    if (m.role === 'user') for (const id of endedInNotification(m.text)) ended.add(id)
     for (const u of m.toolUses) {
       if (u.tool === 'TaskStop') {
         const id = u.input.task_id ?? u.input.shell_id
