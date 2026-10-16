@@ -7,6 +7,7 @@ import {
   artifactReasons,
   askReasons,
   cardReasons,
+  endedInNotification,
   endedTaskIds,
   expandHome,
   FOLLOWUP_PREFIX,
@@ -27,6 +28,7 @@ import type { Messages } from './messages'
 
 const report = atom({ plugin: 'archive-check', key: 'report' } as const, null)
 const tasks = atom({ plugin: 'archive-check', key: 'tasks' } as const, [])
+const ended = atom({ plugin: 'archive-check', key: 'ended' } as const, [])
 
 const PANE = 'archive-check'
 // hook の matcher は、このファイルの中の文字列でないと validate が読めない（logic.ts の同名の値と同じ）
@@ -206,6 +208,15 @@ async function trackTask($: EngineInterface, e: Record<string, unknown>, result:
   }
 }
 
+// 背景タスクの知らせ（<task-notification>）から、終わったタスクの id を残す。
+// ターン中に届いた知らせは会話の行にならず（添付 queued_command）、$.session.messages() からは読めない
+async function recordEnded($: EngineInterface, text: string): Promise<void> {
+  const ids = endedInNotification(text)
+  if (ids.length === 0) return
+  await update($, ended, prev => [...new Set([...(prev ?? []), ...ids])].slice(-200))
+  evaluateSoon($, 0)
+}
+
 // ---- Desktop の記録（アプリの状態ファイル。読むだけ）
 
 let recordPath: string | null = null
@@ -375,11 +386,13 @@ async function evaluate($: EngineInterface): Promise<Report> {
     reasons.push(unread(m.unreadWhat.messages))
   }
 
-  // 背景タスク: この CLI のプロセスで起きて、まだ終わりの知らせが来ていないもの
-  const ended = endedTaskIds(messages)
+  // 背景タスク: この CLI のプロセスで起きて、まだ終わりの知らせが来ていないもの。
+  // 終わりは届いた知らせ（ターン中のものを含む）・会話の行の知らせ・TaskStop から読む
+  const endedIds = endedTaskIds(messages)
+  for (const id of (await read($, ended)) ?? []) endedIds.add(id)
   const startedAt = await readProcessStartedAt($, cliId).catch(() => null)
   for (const task of (await read($, tasks)) ?? []) {
-    if (ended.has(task.id) || (startedAt !== null && task.startedAt < startedAt)) continue
+    if (endedIds.has(task.id) || (startedAt !== null && task.startedAt < startedAt)) continue
     reasons.push({ level: 'blocked', kind: 'task', text: m.backgroundTask(task.label || task.id) })
   }
   try {
@@ -496,6 +509,13 @@ export const register: Register = (on, options) => {
     evaluateSoon($, 500)
     return next(e)
   })
+
+  // 背景タスクの知らせ。idle のときに取り出されたものも、走っているターンに届いたもの（turnId あり）もここを通る。
+  // 知らせは止めも書き換えもしない（失敗しても素通しする）
+  on('prompt.submit', ($, e, next) => {
+    if (e.origin.kind === 'task-notification') void recordEnded($, e.text).catch(() => undefined)
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // 後続を書き出す基準を Claude に渡す。設定 guide の Markdown があればそれ、無ければ既定の文
   on('prompt.compose', async ($, e, next) => {
