@@ -72,15 +72,29 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-// ---- 置き場（Windows は %APPDATA%、macOS は ~/Library/Application Support）
+// ---- 置き場（Windows は %LOCALAPPDATA%\Claude-Data か %APPDATA%、macOS は ~/Library/Application Support）
 
-type Places = { home: string; sep: string; recordRoot: string | null }
+type Places = { home: string; sep: string }
 
 async function places($: EngineInterface): Promise<Places> {
-  const appData = await $.env.get('APPDATA')
   const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME')) || ''
-  if (appData) return { home, sep: '\\', recordRoot: `${appData}\\Claude\\claude-code-sessions` }
-  return { home, sep: '/', recordRoot: home ? `${home}/Library/Application Support/Claude/claude-code-sessions` : null }
+  return { home, sep: (await $.env.get('APPDATA')) ? '\\' : '/' }
+}
+
+// Desktop の記録の置き場の候補を、先に見る順で返す。
+// Windows のデータは 2026-11-06 に %APPDATA%\Claude から %LOCALAPPDATA%\Claude-Data\claude_<パッケージの id> へ移った
+async function recordRoots($: EngineInterface): Promise<string[]> {
+  const appData = await $.env.get('APPDATA')
+  if (!appData) {
+    const { home } = await places($)
+    return home ? [`${home}/Library/Application Support/Claude/claude-code-sessions`] : []
+  }
+  const localAppData = await $.env.get('LOCALAPPDATA')
+  const base = `${localAppData}\\Claude-Data`
+  // 移す前の Desktop には Claude-Data が無い（無いフォルダの $.fs.list は ENOENT で落ちる）
+  const entries = localAppData ? await $.fs.list(base).catch(() => []) : []
+  const moved = entries.filter(e => e.kind === 'dir' && /^claude_/i.test(e.name)).map(e => `${base}\\${e.name}`)
+  return [...moved, `${appData}\\Claude`].map(dir => `${dir}\\claude-code-sessions`)
 }
 
 // ---- Claude への指示（設定 guide の Markdown があればそれ、無ければ既定の文）
@@ -224,16 +238,21 @@ let recordPath: string | null = null
 async function findRecordPath($: EngineInterface): Promise<string | null> {
   if (recordPath !== null) return recordPath
   const hostId = await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')
-  const { sep, recordRoot } = await places($)
-  if (!hostId || recordRoot === null) return null
-  for (const account of await $.fs.list(recordRoot)) {
-    if (account.kind !== 'dir') continue
-    for (const profile of await $.fs.list(`${recordRoot}${sep}${account.name}`)) {
-      if (profile.kind !== 'dir') continue
-      const path = `${recordRoot}${sep}${account.name}${sep}${profile.name}${sep}${hostId}.json`
-      if (await $.fs.exists(path)) {
-        recordPath = path
-        return path
+  if (!hostId) return null
+  const { sep } = await places($)
+  // 記録はセッションの id で引くので、claude_* が複数あっても取り違えない
+  for (const root of await recordRoots($)) {
+    // ⚠ データのフォルダの有無で選ばない。移したあとも %APPDATA%\Claude は残っていて、claude-code-sessions だけが無い
+    if (!(await $.fs.exists(root))) continue
+    for (const account of await $.fs.list(root)) {
+      if (account.kind !== 'dir') continue
+      for (const profile of await $.fs.list(`${root}${sep}${account.name}`)) {
+        if (profile.kind !== 'dir') continue
+        const path = `${root}${sep}${account.name}${sep}${profile.name}${sep}${hostId}.json`
+        if (await $.fs.exists(path)) {
+          recordPath = path
+          return path
+        }
       }
     }
   }

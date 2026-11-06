@@ -69,7 +69,7 @@ echo '{"language":"ja"}' | claude plugin configure archive-check@tanmen --values
 ## 読むもの・書くもの
 
 - 読むだけ:
-  - Desktop のセッションの記録（Windows は `%APPDATA%\Claude\claude-code-sessions\…\<セッション>.json`、macOS は `~/Library/Application Support/Claude/claude-code-sessions/…`）。このセッションの分だけ。アプリの内部のファイルで、形が変わると読めなくなる
+  - Desktop のセッションの記録（Windows は `%LOCALAPPDATA%\Claude-Data\claude_*\claude-code-sessions\…\<セッション>.json`、次に `%APPDATA%\Claude\claude-code-sessions\…`。中に `claude-code-sessions` がある候補を順に見る。macOS は `~/Library/Application Support/Claude/claude-code-sessions/…`）。このセッションの分だけ。アプリの内部のファイルで、形が変わると読めなくなる
   - `~/.claude/sessions/` の各 json（使うのはこの CLI の起動時刻だけ）
   - 作業フォルダの `git rev-parse` / `git status` / `git rev-list`、このセッションの会話（ツールの呼び出しと結果を含む）とエージェントの一覧、設定 `guide` の Markdown
   - このセッションに入ってくるプロンプトのうち、`prompt.submit` の origin が `task-notification` のものの本文（背景タスクやエージェントの終わりのほか、Artifact のコメントや check-in など、Claude Code が差し込む知らせも同じ origin で届く）。拾うのは `<task-notification>` の中の task-id と status だけで、本文は残さない。ほかの origin のプロンプトは読まず、どれも止めも書き換えもしない
@@ -80,7 +80,7 @@ echo '{"language":"ja"}' | claude plugin configure archive-check@tanmen --values
 
 - Claude Code Desktop の Code タブ（手元で動くセッション）。ターミナルの Claude Code にも読み込まれ、札は出さないが、後続のツールとシステムプロンプトの 1 節は入り、判定（git など）も回る。ターミナルで書き出した後続は Desktop の枠には出ない（そのセッションで `list` を呼ぶと読める）
 - PR を見るには `gh`（ログイン済み）
-- Claude Code 2.1.295（Windows 版 Desktop に同梱のもの）で確かめた。背景タスクの知らせの届き方は 2.1.299 で確かめた。macOS の記録の場所は確かめていない。mod の API（function hooks）は early access で、版が上がると動かなくなることがある
+- Claude Code 2.1.295（Windows 版 Desktop に同梱のもの）で確かめた。背景タスクの知らせの届き方は 2.1.299 で確かめた。Windows の記録の場所（`Claude-Data`）は 2.1.317 で確かめた。macOS の記録の場所は確かめていない。mod の API（function hooks）は early access で、版が上がると動かなくなることがある
 
 ## usage-bars と並べる
 

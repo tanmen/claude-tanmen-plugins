@@ -35,10 +35,22 @@ const PANE = {
   },
 } as const
 
-const RECORD = 'C:\\appdata\\Claude\\claude-code-sessions\\acc\\prof\\local_1.json'
+// 記録の置き場。候補は %LOCALAPPDATA%\Claude-Data\claude_* のあとに %APPDATA%\Claude
+const DATA_BASE = 'C:\\local\\Claude-Data'
+const NEW_DATA = `${DATA_BASE}\\claude_pkg`
+const OLD_DATA = 'C:\\appdata\\Claude'
+const recordIn = (data: string) => `${data}\\claude-code-sessions\\acc\\prof\\local_1.json`
+const RECORD = recordIn(NEW_DATA)
 const PID_FILE = 'C:\\home\\.claude\\sessions\\100.json'
 
 type World = {
+  env?: Record<string, string>
+  // 中に claude-code-sessions があるデータのフォルダ（既定は移したあとの形で NEW_DATA）
+  dataDirs?: string[]
+  // フォルダとして残っているが、claude-code-sessions は無いもの（既定は OLD_DATA）
+  leftBehind?: string[]
+  // そのほかのフォルダと、その中身
+  folders?: Record<string, ReturnType<typeof dir | typeof file>[]>
   dirty?: string
   unpushed?: number
   head?: string
@@ -61,12 +73,29 @@ const file = (name: string) => ({ name, kind: 'file' as const, size: 1, mtimeMs:
 function world(on: On, w: World = {}) {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.store(on, w.store ?? {})
-  mock.env(on, { USERPROFILE: 'C:\\home', APPDATA: 'C:\\appdata', CLAUDE_CODE_HOST_SESSION_ID: 'local_1' })
+  mock.env(on, w.env ?? { USERPROFILE: 'C:\\home', APPDATA: 'C:\\appdata', LOCALAPPDATA: 'C:\\local', CLAUDE_CODE_HOST_SESSION_ID: 'local_1' })
   const files: Record<string, string> = {
     [PID_FILE]: JSON.stringify({ sessionId: 'cli-1', startedAt: 500_000 }),
   }
   if (w.record !== null) files[RECORD] = JSON.stringify(w.record ?? {})
   Object.assign(files, w.files ?? {})
+
+  // 本物の $.fs と同じく、無いフォルダの一覧は ENOENT で落ち、$.fs.exists はフォルダにも答える
+  const dataDirs = w.dataDirs ?? [NEW_DATA]
+  const leftBehind = w.leftBehind ?? [OLD_DATA]
+  const folders: NonNullable<World['folders']> = {
+    'C:\\home\\.claude\\sessions': [file('100.json')],
+    ...w.folders,
+  }
+  for (const data of dataDirs) {
+    folders[data] = [dir('claude-code-sessions')]
+    folders[`${data}\\claude-code-sessions`] = [dir('acc')]
+    folders[`${data}\\claude-code-sessions\\acc`] = [dir('prof')]
+  }
+  for (const data of leftBehind) folders[data] = [dir('side-session-notes')]
+  const moved = [...dataDirs, ...leftBehind].filter(d => d.startsWith(`${DATA_BASE}\\`))
+  // 本物の Claude-Data には claude_* のほかに README.txt がある
+  if (moved.length > 0) folders[DATA_BASE] = [file('README.txt'), ...moved.map(d => dir(d.slice(DATA_BASE.length + 1)))]
 
   // 枠を開いた・閉じた・Claude に頼んだ記録
   const panes: { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[] = []
@@ -95,12 +124,10 @@ function world(on: On, w: World = {}) {
   on('agent.list', () => ({ value: [] }))
   on('tool.register', ($, e) => ({ value: { tool: `mcp__archive-check__${e.name}` } }))
   on('fs.list', ($, e) => {
-    if (e.path === 'C:\\appdata\\Claude\\claude-code-sessions') return { value: [dir('acc')] }
-    if (e.path.endsWith('\\acc')) return { value: [dir('prof')] }
-    if (e.path === 'C:\\home\\.claude\\sessions') return { value: [file('100.json')] }
-    return { value: [] }
+    const entries = folders[e.path ?? '']
+    return entries ? { value: entries } : { deny: 'ENOENT' }
   })
-  on('fs.exists', ($, e) => ({ value: e.path in files }))
+  on('fs.exists', ($, e) => ({ value: e.path in files || e.path in folders }))
   on('fs.read', ($, e) => (e.path in files ? { value: files[e.path] ?? '' } : { deny: 'ENOENT' }))
   const run = (exitCode: number, stdout: string, stderr = '') => ({
     value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false },
@@ -207,6 +234,100 @@ test('Desktop の記録が読めなければ「済」にせず、枠に読めな
   await ui.unmount()
   const pane = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...PANE })
   expect(await pane.find({ type: 'Text', text: /読めなかった: Desktop の記録/ })).toBeDefined()
+  await pane.unmount()
+})
+
+// どの置き場の記録を読んだかは、記録に書いた提案カードの題で見分ける
+const recordOf = (title: string) => JSON.stringify({ backgroundTaskSuggestions: [{ id: 't', title }] })
+const OTHER_DATA = `${DATA_BASE}\\claude_other`
+
+const RECORD_PLACES: { name: string; world: World; shown: string | null }[] = [
+  {
+    name: '新しい置き場だけ',
+    world: { leftBehind: [], files: { [recordIn(NEW_DATA)]: recordOf('新') } },
+    shown: '新',
+  },
+  {
+    name: '移したあとの形（古いフォルダが claude-code-sessions なしで残っている）',
+    world: { files: { [recordIn(NEW_DATA)]: recordOf('新') } },
+    shown: '新',
+  },
+  {
+    name: '古い置き場だけ（Claude-Data が無い）',
+    world: { dataDirs: [OLD_DATA], leftBehind: [], files: { [recordIn(OLD_DATA)]: recordOf('古') } },
+    shown: '古',
+  },
+  {
+    name: '古い置き場だけ（LOCALAPPDATA が無い）',
+    world: {
+      env: { USERPROFILE: 'C:\\home', APPDATA: 'C:\\appdata', CLAUDE_CODE_HOST_SESSION_ID: 'local_1' },
+      dataDirs: [OLD_DATA],
+      leftBehind: [],
+      files: { [recordIn(OLD_DATA)]: recordOf('古') },
+    },
+    shown: '古',
+  },
+  {
+    name: '両方にあれば新しい置き場を読む',
+    world: {
+      dataDirs: [NEW_DATA, OLD_DATA],
+      leftBehind: [],
+      files: { [recordIn(NEW_DATA)]: recordOf('新'), [recordIn(OLD_DATA)]: recordOf('古') },
+    },
+    shown: '新',
+  },
+  {
+    name: 'フォルダの有無では選ばない（claude_* に claude-code-sessions が無く、記録は古い置き場）',
+    world: { dataDirs: [OLD_DATA], leftBehind: [NEW_DATA], files: { [recordIn(OLD_DATA)]: recordOf('古') } },
+    shown: '古',
+  },
+  {
+    name: 'claude_* が 2 つあり、このセッションの記録は片方だけ',
+    world: { dataDirs: [OTHER_DATA, NEW_DATA], files: { [recordIn(NEW_DATA)]: recordOf('新') } },
+    shown: '新',
+  },
+  {
+    name: 'どこにも無い',
+    world: { dataDirs: [] },
+    shown: null,
+  },
+]
+
+for (const place of RECORD_PLACES) {
+  test(`記録の置き場: ${place.name}`, JA, async ($, on) => {
+    const clock = world(on, { isRepo: false, record: null, ...place.world })
+    on('ui.render', () => ({ type: 'engine', ref: 0 }))
+    await start($, clock)
+
+    const pane = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...PANE })
+    const unread = await pane.find({ type: 'Text', text: /読めなかった: Desktop の記録/ })
+    if (place.shown === null) {
+      expect(unread).toBeDefined()
+    } else {
+      expect(unread).toBeUndefined()
+      expect(await pane.find({ type: 'Text', text: `未起動の提案カード「${place.shown}」` })).toBeDefined()
+    }
+    await pane.unmount()
+  })
+}
+
+test('記録の置き場: macOS は ~/Library/Application Support を読む（Windows の候補は見ない）', JA, async ($, on) => {
+  const root = '/Users/me/Library/Application Support/Claude/claude-code-sessions'
+  // Windows で走らせると engine が /Users/me を C:\Users\me に直して fs へ渡すので、どちらの綴りにも答える
+  const both = <T,>(path: string, value: T) => ({ [path]: value, [`C:${path.replaceAll('/', '\\')}`]: value })
+  const clock = world(on, {
+    isRepo: false,
+    record: null,
+    env: { HOME: '/Users/me', LOCALAPPDATA: 'C:\\local', CLAUDE_CODE_HOST_SESSION_ID: 'local_1' },
+    leftBehind: [],
+    folders: { ...both(root, [dir('acc')]), ...both(`${root}/acc`, [dir('prof')]) },
+    files: { ...both(`${root}/acc/prof/local_1.json`, recordOf('mac')), [recordIn(NEW_DATA)]: recordOf('win') },
+  })
+  on('ui.render', () => ({ type: 'engine', ref: 0 }))
+  await start($, clock)
+
+  const pane = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...PANE })
+  expect(await pane.find({ type: 'Text', text: '未起動の提案カード「mac」' })).toBeDefined()
   await pane.unmount()
 })
 
