@@ -84,7 +84,9 @@ echo '{"language":"ja"}' | claude plugin configure archive-check@tanmen --values
 
 ## usage-bars と並べる
 
-[usage-bars](../usage-bars) と一緒に入れると、札がバーの左に並ぶ（usage-bars 0.4.1 以降。どちらが先に読み込まれても同じ並びになる）。usage-bars のバーを押して詳細を開いている間だけは、読み込みの順で札がバーの横か詳細の横に付く。
+[usage-bars](../usage-bars) と一緒に入れると、札がバーの左に並んで 1 行になる。どちらが先に読み込まれても同じ並びで、usage-bars のバーを押して詳細を開いている間も、札はバーの横（下端）に付く。ほかの mod が同じ帯に描いているときも、その行の左に札が付く。
+
+Claude Code 2.1.325 から、入力欄の上の帯は mod ごとの行に分かれ、そのままだと縦に積まれる。並べているのは archive-check の側（帯の行の並びを決める hook）だけなので、usage-bars の版は問わない。この並べ方は 2.1.325 の帯の作りに合わせてあり、それより前の Claude Code では一緒に入れると正しく出ない。
 
 ## 外すとき
 

@@ -1,10 +1,12 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { Register } from 'claude-code'
 import type { Mounted, TestBody } from 'claude-code/testing'
 
 const BAND = {
   component: 'AbovePrompt',
   props: {
     hasSurvey: false,
+    isCollapsed: false,
     isWorking: false,
     maxRows: 10,
     bodyColumns: 120,
@@ -81,33 +83,46 @@ test('ターミナルとアンケート中は帯を描かない', async ($, on) 
   await survey.unmount()
 })
 
-test('下に別の mod の木があればバーの左に並べ、無ければバーだけを出す', async ($, on) => {
+type Tree = { type: string; props?: Record<string, unknown>; children?: Tree[]; part?: { plugin: string } }
+
+// 帯に 1 行を描くほかの mod。inline の plugin は文字列にして読み込まれるので、外の値を使わない
+const otherRow: Register = on => {
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Text', props: {}, children: ['ほかの mod'] }) as never)
+}
+
+const measureOnce: TestBody = async ($, on) => {
   mock.clock(on)
   mock.store(on)
   on('session.measure', ($, e) => ({ changed: e.changed }))
-  let beneath: unknown = { type: 'Text', props: {}, children: ['下の mod'] }
-  on('ui.render', () => beneath as never)
   await $.session.measure({
     context: { tokens: 1_000, window: 200_000, percent: 1 },
     rateLimits: [],
     changed: ['context'],
   })
+}
 
-  const withBelow = await $.ui.mount({ plugin: 'usage-bars', surface: 'desktop', ...BAND })
-  const drawn = (await withBelow.drawn()) as { props?: { flexDirection?: string }; children?: unknown[] }
-  expect(drawn.props?.flexDirection).toBe('row')
-  expect(drawn.children).toHaveLength(2)
-  expect(await withBelow.find({ type: 'Text', text: '下の mod' })).toBeDefined()
-  expect(await withBelow.findAll({ type: 'Svg' })).toHaveLength(3)
-  await withBelow.unmount()
+test('ほかの mod の行が無ければ、帯はバーの行だけ', async ($, on) => {
+  await measureOnce($, on)
+  const ui = await $.ui.mount({ plugin: 'usage-bars', surface: 'desktop', ...BAND })
+  const drawn = (await ui.drawn()) as Tree
+  expect(drawn.part?.plugin).toBe('usage-bars')
+  expect(drawn.children).toHaveLength(3)
+  await ui.unmount()
+})
 
-  // エンジン自身の帯（下に何も無い）は出さず、バーだけ
-  beneath = { type: 'engine', ref: 0 }
-  const alone = await $.ui.mount({ plugin: 'usage-bars', surface: 'desktop', ...BAND })
-  expect(await alone.find({ type: 'Text', text: '下の mod' })).toBeUndefined()
-  const bars = (await alone.drawn()) as { children?: unknown[] }
-  expect(bars.children).toHaveLength(3)
-  await alone.unmount()
+test('ほかの mod の行は別の行のまま。この mod の行はバーだけ（札を並べるのは archive-check の側）', { plugins: [{ name: 'other', register: otherRow }] }, async ($, on) => {
+  await measureOnce($, on)
+  const ui = await $.ui.mount({ plugin: 'usage-bars', surface: 'desktop', ...BAND })
+  // エンジンが mod ごとの行を縦に積む
+  const drawn = (await ui.drawn()) as Tree
+  expect(drawn.props?.flexDirection).toBe('column')
+  const rows = drawn.children ?? []
+  expect(rows.map(row => row.part?.plugin).sort()).toEqual(['other', 'usage-bars'])
+  const own = rows.find(row => row.part?.plugin === 'usage-bars')
+  expect(own?.children).toHaveLength(3)
+  expect(JSON.stringify(own)).not.toContain('ほかの mod')
+  expect(await ui.findAll({ type: 'Svg' })).toHaveLength(3)
+  await ui.unmount()
 })
 
 test('5h / 7d が無い間は前回の値を色を落として出す', async ($, on) => {
