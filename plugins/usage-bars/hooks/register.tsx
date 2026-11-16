@@ -527,10 +527,9 @@ export const register: Register = (on, options) => {
     // ターミナルには statusLine があるので、帯は Desktop だけに出す
     if (e.surface !== 'desktop' || e.props.hasSurvey) return next(e)
 
-    // 下に別の mod（archive-check など）の木があれば、バーの左に並べる
-    const below = await next(e)
+    // 帯は mod ごとに 1 行。ここではこの mod の行だけを描く（archive-check は自分で札をこの行の左に寄せる）
     const snap = await read($, snapshot)
-    if (snap === null) return below
+    if (snap === null) return next(e)
 
     const open = await read($, detail)
     const now = await $.clock.now()
@@ -541,7 +540,7 @@ export const register: Register = (on, options) => {
       ...WINDOWS.map(w => windowMeter(snap, w.kind, w.label, now)),
     ]
 
-    const meterRow = (
+    const bars = (
       <Box flexDirection="row" gap={2}>
         {meters.map(meter => (
           // 押せる面（absolute）の基準。無いと、ほかの木と並べたときに面が帯全体に広がる
@@ -553,19 +552,6 @@ export const register: Register = (on, options) => {
           </Box>
         ))}
       </Box>
-    )
-    const hasBelow = (below as { type?: unknown }).type !== 'engine'
-    const bars = hasBelow ? (
-      <Box flexDirection="row" gap={1}>
-        <Box flexDirection="column" flexShrink={0}>
-          {below}
-        </Box>
-        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-          {meterRow}
-        </Box>
-      </Box>
-    ) : (
-      meterRow
     )
     if (open === null) return bars
 

@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, Register } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 
 import { endedInNotification, endedTaskIds, parsePrStatus, pendingAsks, publishedArtifacts, replayPlan } from '../hooks/logic'
@@ -14,6 +14,7 @@ const BAND = {
   component: 'AbovePrompt',
   props: {
     hasSurvey: false,
+    isCollapsed: false,
     isWorking: false,
     maxRows: 10,
     bodyColumns: 120,
@@ -21,6 +22,15 @@ const BAND = {
     view: {},
   },
 } as const
+
+// 帯に 1 行を描くほかの mod（usage-bars の代わり）。inline の plugin は文字列にして読み込まれるので、外の値を使わない
+const barsRow: Register = on => {
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Box', props: {}, children: [{ type: 'Text', props: {}, children: ['bars'] }] }) as never)
+}
+// prepend はこの mod より上、append は下に読み込まれる（帯の行の順が入れ替わる）
+const usageBars = (tier: 'prepend' | 'append') => ({ name: 'usage-bars', tier, register: barsRow })
+
+type Tree = { type: string; props?: Record<string, unknown>; children?: Tree[]; part?: { plugin: string } }
 
 const PANE = {
   component: 'Pane',
@@ -170,9 +180,8 @@ async function badge(ui: { findAll: (q: { type: string }) => Promise<{ props: Re
   return { source: String(svgs[0]?.props.source), alt: String(svgs[0]?.props.alt) }
 }
 
-test('未コミットの変更があれば「作」にして、下の mod の木の左に並べる', JA, async ($, on) => {
+test('未コミットの変更があれば「作」にする。ほかの mod の行が無ければ、帯は札だけ', JA, async ($, on) => {
   const clock = world(on, { dirty: ' M a.ts\n?? b.ts\n' })
-  on('ui.render', () => ({ type: 'Box' }))
   await start($, clock)
 
   const ui = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...BAND })
@@ -180,11 +189,46 @@ test('未コミットの変更があれば「作」にして、下の mod の木
   expect(source).toContain('>作<')
   expect(source).toContain('#F09595')
   expect(alt).toBe('作業中（アーカイブすると作業を失う）')
-  // 札と、下の mod の木（ここでは空の Box）が横に並ぶ
-  const drawn = (await ui.drawn()) as { type: string; props?: { flexDirection?: string }; children?: unknown[] }
-  expect(drawn.props?.flexDirection).toBe('row')
-  expect(drawn.children).toHaveLength(2)
+  // 包まずに、この mod の行（札）がそのまま帯になる
+  const drawn = (await ui.drawn()) as Tree
+  expect(drawn.part?.plugin).toBe('archive-check')
+  expect(drawn.props?.position).toBe('relative')
   await ui.unmount()
+})
+
+for (const tier of ['prepend', 'append'] as const) {
+  test(`usage-bars の行があれば、札をその左に並べて 1 行にする（usage-bars が ${tier === 'prepend' ? '上' : '下'}）`, { ...JA, plugins: [usageBars(tier)] }, async ($, on) => {
+    const clock = world(on, { dirty: ' M a.ts\n' })
+    await start($, clock)
+
+    const ui = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...BAND })
+    // 札は 1 枚だけ（この mod の行は外して、包む側に描く）
+    expect((await badge(ui)).source).toContain('>作<')
+    const drawn = (await ui.drawn()) as Tree
+    expect(drawn.part?.plugin).toBe('archive-check')
+    expect(drawn.props?.flexDirection).toBe('row')
+    expect(drawn.props?.alignItems).toBe('flex-end')
+    const [left, right] = drawn.children ?? []
+    expect(left?.props?.position).toBe('relative')
+    // usage-bars の行は写さずに包むので、持ち主は usage-bars のまま
+    expect(right?.children?.map(row => row.part?.plugin)).toEqual(['usage-bars'])
+    expect(await ui.find({ type: 'Text', text: 'bars' })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('usage-bars と並べたときも、札を押すと右側の枠を開く', { ...JA, plugins: [usageBars('prepend')] }, async ($, on) => {
+  const opened: string[] = []
+  const clock = world(on, { dirty: ' M a.ts\n', opened })
+  await start($, clock)
+
+  const band = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...BAND })
+  expect(((await band.drawn()) as Tree).props?.flexDirection).toBe('row')
+  await band.post({ source: 'archive-check' })
+  await clock.advance(0)
+  await clock.settle()
+  expect(opened).toEqual(['open:archive-check'])
+  await band.unmount()
 })
 
 test('どれも無ければ「済」。git の管理外のフォルダでも「済」', JA, async ($, on) => {
@@ -549,16 +593,17 @@ test('作った Artifact の行は英語の既定でも出る（Ask to tidy up /
   await pane.unmount()
 })
 
-test('ターミナルとアンケート中は帯に描かない', JA, async ($, on) => {
+test('ターミナルとアンケート中は帯に描かず、ほかの mod の行はそのまま出す', { ...JA, plugins: [usageBars('append')] }, async ($, on) => {
   const clock = world(on, { dirty: ' M a.ts\n' })
-  on('ui.render', () => ({ type: 'engine', ref: 0 }))
   await start($, clock)
 
   const terminal = await $.ui.mount({ plugin: 'archive-check', surface: 'terminal', ...BAND })
   expect(await terminal.findAll({ type: 'Svg' })).toHaveLength(0)
+  expect(((await terminal.drawn()) as Tree).part?.plugin).toBe('usage-bars')
   await terminal.unmount()
   const survey = await $.ui.mount({ plugin: 'archive-check', surface: 'desktop', ...BAND, props: { ...BAND.props, hasSurvey: true } })
   expect(await survey.findAll({ type: 'Svg' })).toHaveLength(0)
+  expect(((await survey.drawn()) as Tree).part?.plugin).toBe('usage-bars')
   await survey.unmount()
 })
 

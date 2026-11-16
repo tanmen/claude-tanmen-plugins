@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { Elements, EngineInterface, Register } from 'claude-code'
 
 import type { BackgroundTask, FollowUp, Reason, ReasonAction, Report, Verdict } from '../types'
 import {
@@ -30,6 +30,7 @@ const report = atom({ plugin: 'archive-check', key: 'report' } as const, null)
 const tasks = atom({ plugin: 'archive-check', key: 'tasks' } as const, [])
 const ended = atom({ plugin: 'archive-check', key: 'ended' } as const, [])
 
+const PLUGIN = 'archive-check'
 const PANE = 'archive-check'
 // hook の matcher は、このファイルの中の文字列でないと validate が読めない（logic.ts の同名の値と同じ）
 const FOLLOWUP_TOOL = 'mcp__archive-check__followup'
@@ -62,6 +63,19 @@ function badgeSvg(verdict: Verdict): string {
     `<text x="50%" y="14" text-anchor="middle" font-family="${FONT}" font-size="12" font-weight="600" fill="${tone.text}">${m.badge[verdict]}</text>`,
     `</svg>`,
   ].join('')
+}
+
+// 札。重ねた hit.ts が、押されたことを知らせてくる
+function badgeTree(el: Elements['desktop'], verdict: Verdict) {
+  const { Box, Client, Svg } = el
+  return (
+    <Box position="relative" flexShrink={0}>
+      <Svg source={badgeSvg(verdict)} alt={m.alt[verdict]} width={m.badgeWidth} height={HEIGHT} />
+      <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+        <Client key="hit-archive-check" module="./hit.ts" props={{}} width="100%" height="100%" />
+      </Box>
+    </Box>
+  )
 }
 
 function unread(what: string): Reason {
@@ -552,31 +566,35 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // この mod の行（札だけ）。ほかの mod と並べるのは下の AbovePromptList
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // ターミナルには描かない（Desktop の帯だけ）
     if (e.surface !== 'desktop' || e.props.hasSurvey) return next(e)
-    const below = await next(e)
     const current = await read($, report)
-    if (current === null) return below
+    if (current === null) return next(e)
+    return badgeTree($.ui.resolve(e), current.verdict)
+  })
 
-    const { Box, Client, Svg } = $.ui.resolve(e)
+  // 帯は mod ごとに 1 行で、そのままだと縦に積まれる。ほかの mod（usage-bars など）の行があれば、
+  // この mod の行を外し、残りの行を包んでその左に札を置く。行の木は写さず await next の答えを包む
+  // （写すと行の持ち主が分からなくなり、押せる面がその mod に届かない）。並べるのはこの hook だけなので、
+  // 読み込みの順で並びは変わらない
+  on('ui.render', { component: 'AbovePromptList' }, async ($, e, next) => {
+    if (e.surface !== 'desktop') return next(e)
+    const others = e.props.rows.filter(row => row.plugin !== PLUGIN)
+    if (others.length === 0 || others.length === e.props.rows.length) return next(e)
+    const current = await read($, report)
+    if (current === null) return next(e)
 
-    // 札。下の mod（usage-bars など）の木があれば、その左に並べる
-    const badge = (
-      <Box position="relative" flexShrink={0}>
-        <Svg source={badgeSvg(current.verdict)} alt={m.alt[current.verdict]} width={m.badgeWidth} height={HEIGHT} />
-        <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-          <Client key="hit-archive-check" module="./hit.ts" props={{}} width="100%" height="100%" />
-        </Box>
-      </Box>
-    )
-    const hasBelow = (below as { type?: unknown }).type !== 'engine'
-    if (!hasBelow) return badge
+    const rest = await next({ ...e, props: { ...e.props, rows: others } })
+    const el = $.ui.resolve(e)
+    const { Box } = el
+    // 下端でそろえる（usage-bars の詳細を開いている間も、札はバーの横に付く）
     return (
-      <Box flexDirection="row" gap={1}>
-        {badge}
+      <Box flexDirection="row" alignItems="flex-end" gap={1}>
+        {badgeTree(el, current.verdict)}
         <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-          {below}
+          {rest}
         </Box>
       </Box>
     )
