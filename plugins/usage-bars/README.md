@@ -109,6 +109,16 @@ echo '{"size":"regular"}' | claude plugin configure usage-bars@tanmen --values-s
 
 ## 開発
 
+リポジトリの根で `scripts/check.sh` を回すと、validate・test・型チェックをまとめて回せる（名前を外すと全部の mod）。Windows の Desktop に同梱の `claude.exe` と、plugin-authoring の skill が展開する型定義を自分で探し、tsc は `pnpm dlx` で取る。探し方と上書きのしかたはスクリプトの頭に書いてある。
+
+```sh
+sh scripts/check.sh usage-bars
+```
+
+PowerShell からは `& "$env:ProgramFiles\Git\bin\sh.exe" scripts/check.sh usage-bars`（PowerShell の `bash` は WSL のものに当たることがある）。
+
+1 つずつ回すなら、mod のフォルダで:
+
 ```sh
 claude plugin validate .
 claude plugin test .
@@ -116,7 +126,7 @@ claude plugin test .
 
 作業中の mod は `claude --plugin-dir .` で読み込める。
 
-型チェック: `claude --plugin-dir .` で一度起動すると、Claude Code が `.claude-plugin/types/` に型定義と `tsconfig.json` を置く（インストールしたものや `claude -p` では置かれない）。ルートの `tsconfig.json` はそれを継いでいるので、そのあとは `tsc -p .` で検査できる。
+型チェックだけを回すなら: `claude --plugin-dir .` で一度起動すると、Claude Code が `.claude-plugin/types/` に型定義と `tsconfig.json` を置く（インストールしたものや `claude -p` では置かれない）。ルートの `tsconfig.json` はそれを継いでいるので、そのあとは `tsc -p .` で検査できる。
 
 ## License
 

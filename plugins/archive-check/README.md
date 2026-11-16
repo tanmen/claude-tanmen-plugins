@@ -94,6 +94,14 @@ claude plugin uninstall archive-check@tanmen
 
 ## 開発
 
+リポジトリの根で `scripts/check.sh` を回すと、validate・test・型チェックをまとめて回せる（名前を外すと全部の mod。道具の探し方は usage-bars の README の「開発」と同じ）。
+
+```sh
+sh scripts/check.sh archive-check
+```
+
+1 つずつ回すなら、mod のフォルダで:
+
 ```sh
 claude plugin validate .
 claude plugin test .
